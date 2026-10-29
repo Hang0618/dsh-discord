@@ -26,7 +26,7 @@ export const name = 'dsh-discord'
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets']
 
 /** 日志里带版本号，方便确认热重载到底有没有换成新代码 */
-const VERSION = '0.3.7'
+const VERSION = '0.3.8'
 
 const HELP_TEXT = [
   '**本鱼在呢。** 直接说话就行，别的都不用管。',
@@ -636,6 +636,7 @@ export function apply(ctx, config = {}) {
   /**
    * 投喂给模型的内容：把 <@id> / <@!id> 换成 @显示名，让本鱼知道在跟谁说话。
    * cleanContent 会把 mention 整个抹掉，模型就永远看不到「@了谁」——主人指认人时全靠这个。
+   * 顺带把「回复/引用」到的那条消息也带进来，不然模型只看得到「你看！」看不到「看什么」。
    */
   function renderContent(data) {
     const raw = String(data?.content || '')
@@ -648,9 +649,42 @@ export function apply(ctx, config = {}) {
     if (state.botUserId && names.has(String(state.botUserId))) {
       names.set(String(state.botUserId), '本鱼')
     }
-    return raw
+    const body = raw
       .replace(/<@!?(\d+)>/g, (whole, id) => (names.has(id) ? `@${names.get(id)}` : whole))
       .trim()
+    const quoted = renderQuoted(data, names)
+    return body ? `${quoted ? `${quoted}\n` : ''}${body}` : quoted
+  }
+
+  /** 被「回复/引用」的那条消息，渲染成一行带进上下文。 */
+  function renderQuoted(data, names) {
+    const ref = data?.referenced_message
+    if (!ref) {
+      return data?.message_reference?.message_id
+        ? '[回复了一条已经删掉、或者本鱼看不到的消息]'
+        : ''
+    }
+    const refAuthorId = String(ref.author?.id || '')
+    const isMe = Boolean(state.botUserId && refAuthorId === String(state.botUserId))
+    // 引用消息自己的 mentions 里才有它 @ 过的人（当前消息的 mentions 未必包含）
+    const refNames = new Map(names)
+    for (const user of Array.isArray(ref.mentions) ? ref.mentions : []) {
+      const id = String(user?.id || '')
+      if (!id) continue
+      refNames.set(id, String(user.global_name || user.username || id).slice(0, 40))
+    }
+    if (state.botUserId && refNames.has(String(state.botUserId))) {
+      refNames.set(String(state.botUserId), '本鱼')
+    }
+    const name = isMe
+      ? '你（本鱼）'
+      : names.get(refAuthorId) ||
+        String(ref.author?.global_name || ref.author?.username || refAuthorId || '某人')
+    const text = String(ref.content || '')
+      .replace(/<@!?(\d+)>/g, (whole, id) => (refNames.has(id) ? `@${refNames.get(id)}` : whole))
+      .trim()
+    const clipped = text.length > 500 ? `${text.slice(0, 500)}…` : text
+    return `[回复 / 引用了 ${name} 的消息：「${clipped || '（没有文字，可能只是图片或附件）'}」]`
   }
 
   function makeUserMessage(text) {
@@ -788,6 +822,18 @@ export function apply(ctx, config = {}) {
     const otherMentions = [...rawContent.matchAll(/<@!?(\d+)>/g)]
       .map((match) => match[1])
       .filter((id) => id !== String(state.botUserId))
+    // 「回复/引用」的那条消息，网关偶尔不带完整内容（被删、或暂时缺字段）——补拉一次，
+    // 不然引用回复就变成睁眼瞎：只知道「回复了」，不知道「回复的是哪句」。
+    if (!data.referenced_message && data.message_reference?.message_id && channelId) {
+      try {
+        data.referenced_message = await rest.request(
+          'GET',
+          `/channels/${channelId}/messages/${data.message_reference.message_id}`,
+        )
+      } catch (error) {
+        log(`补拉被引用的消息失败：${error?.status || ''} ${error?.message || error}`)
+      }
+    }
     // 用 Discord 的「回复/引用」功能回了本鱼某条消息 —— 就算没 @ 也算在跟本鱼说话
     const referenced = data.referenced_message
     const repliesToBot = Boolean(
