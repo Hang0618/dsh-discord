@@ -1,0 +1,4 @@
+# dsh-discord bundle 层：装配时自动挂上，profile 想关掉就按 id 禁掉。
+- insert:
+    - id: dsh-discord
+      name: dsh-discord

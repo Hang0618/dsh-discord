@@ -1,0 +1,10 @@
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+
+# 本地运行时产物（token、记忆、账本，绝不进仓库）
+discord-bridge.json
+.dsh/
+*.local.json
+.tmp-*
