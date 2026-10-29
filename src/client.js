@@ -2,7 +2,7 @@
 //
 // Host 会把陌生人的 @ 和机器人说的话挂成一条待确认（/api/dsh-discord/pending），
 // 这里列出来让主人拍板：
-//   人：允许 / 拒绝，以及「这个人是不是每次都要 @ 本鱼」；
+//   人：允许 / 拒绝，以及「这个人是不是每次都要 @ 我」；
 //   机器人：接不接收、要不要真的跟它聊（拒绝就再也不理它）。
 // 只走同源接口，不做任何跨域请求。
 
@@ -81,7 +81,7 @@ window.__ModuleLoader__.load({
         // 浏览器系统通知（有权限才弹）
         if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
           try {
-            new Notification('本鱼先歇一下', { body: text })
+            new Notification('我先歇一下', { body: text })
           } catch {}
         }
         // 页面右下角浮条：没权限也能看见
@@ -128,12 +128,12 @@ window.__ModuleLoader__.load({
         if (notice.reason === 'quota') {
           showNotice(
             `主人给${who}划的花费额度是 ${notice.quota} ${cur}，已经花到 ${notice.spent} ${cur}，` +
-              `Discord 聊天先暂停了。\n把账本清零、或者把额度调大，本鱼才接着说。`,
+              `Discord 聊天先暂停了。\n把账本清零、或者把额度调大，我才接着说。`,
           )
         } else {
           showNotice(
             `余额 ${notice.total} ${cur} 已经跌到${who}的线 ${notice.min} ${cur}，` +
-              `Discord 聊天先暂停了。\n充值以后本鱼自己就醒，不用管。`,
+              `Discord 聊天先暂停了。\n充值以后我自己就醒，不用管。`,
           )
         }
       } catch {}
@@ -311,12 +311,12 @@ window.__ModuleLoader__.load({
         'div',
         { style: S.card },
         h('div', { style: S.head }, h('span', { style: S.name }, 'Discord 准入'),
-          h('span', { style: S.user }, pending.length > 0 ? `${pending.length} 个在等本鱼回话` : '暂时没人等着')),
+          h('span', { style: S.user }, pending.length > 0 ? `${pending.length} 个在等我回话` : '暂时没人等着')),
         h(
           'div',
           { style: S.hint },
-          '私聊永远只认主人。服务器里别人想跟本鱼说话，得先 @ 本鱼，再由这里点头；',
-          '「每次都要 @」= 以后必须 @ 或引用本鱼；「不用每次 @」= @ 之外，叫本鱼的名字（关键词）也叫得动，但不会每句都接。',
+          '私聊永远只认主人。服务器里别人想跟我说话，得先 @ 我，再由这里点头；',
+          '「每次都要 @」= 以后必须 @ 或引用我；「不用每次 @」= @ 之外，叫我的名字（关键词）也叫得动，但不会每句都接。',
           ' 别的机器人说话也会先挂在这儿：可以选「接收并跟它聊」或「只接收、不主动回」，决定会记住。',
         ),
         error ? h('div', { style: { ...S.snippet, color: 'rgb(220,110,110)' } }, error) : null,
@@ -498,7 +498,7 @@ window.__ModuleLoader__.load({
         try {
           if (typeof Notification === 'undefined') {
             setNotifyState('unsupported')
-            showNotice('这个环境没有系统通知，本鱼改用页面右下角的红条提醒主人（这个能看到）。')
+            showNotice('这个环境没有系统通知，我改用页面右下角的红条提醒主人（这个能看到）。')
             return
           }
           let perm = Notification.permission
@@ -506,8 +506,8 @@ window.__ModuleLoader__.load({
           setNotifyState(perm)
           showNotice(
             perm === 'granted'
-              ? '系统通知已经开了 ✅ 本鱼踩到预算线时会这样提醒主人。'
-              : `系统通知被拒了（${perm}），本鱼改用页面右下角红条提醒，一样能看到。`,
+              ? '系统通知已经开了 ✅ 我踩到预算线时会这样提醒主人。'
+              : `系统通知被拒了（${perm}），我改用页面右下角红条提醒，一样能看到。`,
           )
         } catch (err) {
           setNotifyState('error')
@@ -651,7 +651,7 @@ window.__ModuleLoader__.load({
           { style: { display: 'grid', gap: '6px', marginTop: '4px' } },
           h('div', { style: S.name }, '某个服务器'),
           guildRows.length === 0
-            ? h('div', { style: S.empty }, '还没见过服务器。先在服务器里说句话，本鱼记下名字就出现了。')
+            ? h('div', { style: S.empty }, '还没见过服务器。先在服务器里说句话，我记下名字就出现了。')
             : guildRows.map((row) => {
                 const g = guildDraft[row.id] || { min: '', quota: '' }
                 const setG = (patch) => {

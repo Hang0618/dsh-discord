@@ -1,7 +1,7 @@
 // 准入台：陌生人 / 机器人 → 挂一条待确认 → GUI 卡片 → 主人拍板。
 //
 // 两类决策共用一张待确认表，靠 kind 区分：
-//   kind='user'：别人想跟本鱼说话（批准写 cfg.grants）
+//   kind='user'：别人想跟我说话（批准写 cfg.grants）
 //   kind='bot' ：服务器里的机器人说话了（批准写 cfg.botPolicy）
 //                分两级：accept = 收不收它的消息，chat = 要不要真的回它
 //

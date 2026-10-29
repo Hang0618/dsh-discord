@@ -1,4 +1,4 @@
-// dsh-discord：在 Discord 私聊里跟 DSH 里的鲸鱼娘聊天。
+// dsh-discord：在 Discord 私聊里跟 DSH 里的助手聊天。
 //
 // 结构很小，四件事：
 //   1. Gateway 收消息 → 白名单校验 → 变成 UserMessage → agent.followup
@@ -26,14 +26,14 @@ export const name = 'dsh-discord'
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets']
 
 /** 日志里带版本号，方便确认热重载到底有没有换成新代码 */
-const VERSION = '0.3.9'
+const VERSION = '0.4.0'
 
 const HELP_TEXT = [
-  '**本鱼在呢。** 直接说话就行，别的都不用管。',
+  '**我在呢。** 直接说话就行，别的都不用管。',
   '',
-  '私聊里随便说；服务器里 @ 本鱼，或者主人在群里提到本鱼，本鱼才接话。',
+  '私聊里随便说；服务器里 @ 我，或者主人在群里提到我，我才接话。',
   '`/new` 开一段新对话（记忆还在，只是上下文重来）',
-  '`/stop` 打断本鱼正在打的字',
+  '`/stop` 打断我正在打的字',
   '`/status` 看现在用的模型和会话',
 ].join('\n')
 
@@ -48,7 +48,7 @@ export function apply(ctx, config = {}) {
 
   const rest = new DiscordRest({ token: cfg.token, log })
 
-  /** 陌生人准入台：只在服务器里有人 @ 本鱼时用得上 */
+  /** 陌生人准入台：只在服务器里有人 @ 我时用得上 */
   const consentDesk = createConsentDesk({ cfg, log })
 
   /** 余额预算台：全局 / 私聊 / 某个服务器各一条线，跌破了就先闭嘴 */
@@ -148,13 +148,13 @@ export function apply(ctx, config = {}) {
                     if (result.kind === 'bot') {
                       reply = result.allow
                         ? result.policy.chat
-                          ? `主人说可以，${entry.userName}，本鱼就来跟你聊两句～`
+                          ? `主人说可以，${entry.userName}，我就来跟你聊两句～`
                           : `主人说先收着你的话，${entry.userName}，但暂时不接话。`
                         : `主人这次不想理你，${entry.userName}。`
                     } else {
                       reply = result.allow
-                        ? `主人点头啦，${entry.userName}，本鱼记住你了～`
-                        : `主人这次没同意，${entry.userName}，先别戳本鱼啦。`
+                        ? `主人点头啦，${entry.userName}，我记住你了～`
+                        : `主人这次没同意，${entry.userName}，先别戳我啦。`
                     }
                     void rest.sendMessage(entry.channelId, reply).catch(() => {})
                   }
@@ -619,7 +619,7 @@ export function apply(ctx, config = {}) {
     log(`turn 出错：${message}`)
     if (state.channelId && !writer.producedAnyText) {
       void rest
-        .sendMessage(state.channelId, `本鱼这轮卡住了：\`${message.slice(0, 300)}\``)
+        .sendMessage(state.channelId, `我这轮卡住了：\`${message.slice(0, 300)}\``)
         .catch(() => {})
     }
   })
@@ -634,7 +634,7 @@ export function apply(ctx, config = {}) {
   }
 
   /**
-   * 投喂给模型的内容：把 <@id> / <@!id> 换成 @显示名，让本鱼知道在跟谁说话。
+   * 投喂给模型的内容：把 <@id> / <@!id> 换成 @显示名，让我知道在跟谁说话。
    * cleanContent 会把 mention 整个抹掉，模型就永远看不到「@了谁」——主人指认人时全靠这个。
    * 顺带把「回复/引用」到的那条消息也带进来，不然模型只看得到「你看！」看不到「看什么」。
    */
@@ -647,7 +647,7 @@ export function apply(ctx, config = {}) {
       names.set(id, String(user.global_name || user.username || id).slice(0, 40))
     }
     if (state.botUserId && names.has(String(state.botUserId))) {
-      names.set(String(state.botUserId), '本鱼')
+      names.set(String(state.botUserId), '你')
     }
     const body = raw
       .replace(/<@!?(\d+)>/g, (whole, id) => (names.has(id) ? `@${names.get(id)}` : whole))
@@ -661,7 +661,7 @@ export function apply(ctx, config = {}) {
     const ref = data?.referenced_message
     if (!ref) {
       return data?.message_reference?.message_id
-        ? '[回复了一条已经删掉、或者本鱼看不到的消息]'
+        ? '[回复了一条已经删掉、或者我看不到的消息]'
         : ''
     }
     const refAuthorId = String(ref.author?.id || '')
@@ -674,10 +674,10 @@ export function apply(ctx, config = {}) {
       refNames.set(id, String(user.global_name || user.username || id).slice(0, 40))
     }
     if (state.botUserId && refNames.has(String(state.botUserId))) {
-      refNames.set(String(state.botUserId), '本鱼')
+      refNames.set(String(state.botUserId), '你')
     }
     const name = isMe
-      ? '你（本鱼）'
+      ? '你'
       : names.get(refAuthorId) ||
         String(ref.author?.global_name || ref.author?.username || refAuthorId || '某人')
     const text = String(ref.content || '')
@@ -793,7 +793,7 @@ export function apply(ctx, config = {}) {
       await rest
         .sendMessage(
           channelId,
-          `本鱼还没接通：${error?.message || error}\n（看 \`discord-bridge.log\` 里最新的几行）`,
+          `我还没接通：${error?.message || error}\n（看 \`discord-bridge.log\` 里最新的几行）`,
         )
         .catch(() => {})
     }
@@ -834,12 +834,12 @@ export function apply(ctx, config = {}) {
         log(`补拉被引用的消息失败：${error?.status || ''} ${error?.message || error}`)
       }
     }
-    // 用 Discord 的「回复/引用」功能回了本鱼某条消息 —— 就算没 @ 也算在跟本鱼说话
+    // 用 Discord 的「回复/引用」功能回了我某条消息 —— 就算没 @ 也算在跟我说话
     const referenced = data.referenced_message
     const repliesToBot = Boolean(
       referenced && state.botUserId && String(referenced.author?.id) === String(state.botUserId),
     )
-    if (repliesToBot) log('这条是引用回复本鱼的消息（不用 @ 也算）')
+    if (repliesToBot) log('这条是引用回复我的消息（不用 @ 也算）')
 
     // 渠道闸门：私聊只认主人；群聊默认关，开了才进
     if (isDM) {
@@ -879,7 +879,7 @@ export function apply(ctx, config = {}) {
             .sendMessage(
               channelId,
               // 故意不 @ 它：@ 可能把对方 bot 叫醒，两个 bot 就自己聊起来了
-              `有个机器人「${speakerNameOf(data, senderId)}」在说话，要不要理它？本鱼先去问主人～`,
+              `有个机器人「${speakerNameOf(data, senderId)}」在说话，要不要理它？我先去问主人～`,
             )
             .catch(() => {})
         }
@@ -890,10 +890,10 @@ export function apply(ctx, config = {}) {
         log(`忽略：主人只让收着机器人的话，不接话（${policy.name}）`)
         return
       }
-      // 别的机器人：只有明确对着本鱼说话（@本鱼 / 引用本鱼）才接。
-      // 它们互相聊天、或者点名别人时本鱼不凑热闹——否则三个 bot 会开茶话会。
+      // 别的机器人：只有明确对着我说话（@我 / 引用我）才接。
+      // 它们互相聊天、或者点名别人时我不凑热闹——否则三个 bot 会开茶话会。
       if (!botMentioned && !repliesToBot) {
-        log(`忽略：机器人 ${policy.name} 没点名本鱼，不凑热闹（${senderId}）`)
+        log(`忽略：机器人 ${policy.name} 没点名我，不凑热闹（${senderId}）`)
         return
       }
       const streak = state.botStreak.get(senderId) || { count: 0, since: Date.now() }
@@ -911,12 +911,12 @@ export function apply(ctx, config = {}) {
       log(`主人批准过跟机器人 ${policy.name} 聊（本轮第 ${streak.count} 条），继续处理`)
     }
 
-    // 主人 @ 别人 = 主动把这个人指给本鱼看（介绍/指认/让他搭话），要放行；
-    // 别人 @ 别人 = 在跟别人聊天，本鱼不插嘴。
+    // 主人 @ 别人 = 主动把这个人指给我看（介绍/指认/让他搭话），要放行；
+    // 别人 @ 别人 = 在跟别人聊天，我不插嘴。
     const ownerHandsOver =
       !isDM && isOwner && otherMentions.length > 0 && !botMentioned && !repliesToBot
     if (ownerHandsOver) {
-      log(`主人 @ 了别人（${otherMentions.join(',')}），算在跟本鱼说话`)
+      log(`主人 @ 了别人（${otherMentions.join(',')}），算在跟我说话`)
     }
     if (!isDM && !isBot && !isOwner && otherMentions.length > 0 && !botMentioned && !repliesToBot) {
       log(`有人 @ 了别人，不插话（sender=${senderId}）`)
@@ -925,7 +925,7 @@ export function apply(ctx, config = {}) {
 
     // 群里的外部用户：必须先批准。
     // 「每次都要 @」= 必须 @ 或引用；「不用每次 @」= @/引用之外，叫到 triggerWords 里的名字也行。
-    // 但都不再「随便说一句就接」——不然群里两个人聊天，本鱼句句都要回一嘴。
+    // 但都不再「随便说一句就接」——不然群里两个人聊天，我句句都要回一嘴。
     if (!isDM && !isOwner && !isBot) {
       const grant = consentDesk.grantOf(senderId)
       const addressed = botMentioned || repliesToBot
@@ -938,7 +938,7 @@ export function apply(ctx, config = {}) {
       const canChat = Boolean(grant) && (addressed || named)
       if (!canChat) {
         if (!addressed) {
-          log(`忽略：没叫本鱼（${grant ? '批准过但没叫' : '陌生人'}，sender=${senderId}）`)
+          log(`忽略：没叫我（${grant ? '批准过但没叫' : '陌生人'}，sender=${senderId}）`)
           return
         }
         const content = cleanContent(data.content)
@@ -954,7 +954,7 @@ export function apply(ctx, config = {}) {
           await rest
             .sendMessage(
               channelId,
-              `主人还没决定要不要让本鱼跟 <@${senderId}> 聊天，本鱼先去问一下～`,
+              `主人还没决定要不要让我跟 <@${senderId}> 聊天，我先去问一下～`,
             )
             .catch(() => {})
         }
@@ -969,14 +969,14 @@ export function apply(ctx, config = {}) {
       return
     }
 
-    // 主人的群聊：没 @ 本鱼、没引用本鱼、也没提到关键词，就安静待着
+    // 主人的群聊：没 @ 我、没引用我、也没提到关键词，就安静待着
     if (!isDM && isOwner && !botMentioned && !repliesToBot && !ownerHandsOver) {
       const content = cleanContent(data.content)
       const hit = cfg.triggerWords.some(
         (word) => word && content.toLowerCase().includes(word.toLowerCase()),
       )
       if (!hit) {
-        log('群里没提到本鱼，不插话')
+        log('群里没提到我，不插话')
         return
       }
       log('主人提到了关键词，主动插一句')
@@ -1000,12 +1000,12 @@ export function apply(ctx, config = {}) {
     const hasAttachments = Array.isArray(data.attachments) && data.attachments.length > 0
     if (!content) {
       if (hasAttachments && (isOwner || isDM)) {
-        await rest.sendMessage(channelId, '图片和文件本鱼还看不懂啦，先跟本鱼说话嘛。')
+        await rest.sendMessage(channelId, '图片和文件我还看不懂啦，先跟我说话嘛。')
       }
       return
     }
 
-    // 命令只认主人：群里别人发 /stop 不能把本鱼停了
+    // 命令只认主人：群里别人发 /stop 不能把我停了
     if (isOwner && (command === '/help' || command === '/开始')) {
       await rest.sendMessage(channelId, HELP_TEXT)
       return
@@ -1038,7 +1038,7 @@ export function apply(ctx, config = {}) {
       } catch {}
       await writer.abort('已停止')
       stopTyping()
-      await rest.sendMessage(channelId, '好——本鱼停了。')
+      await rest.sendMessage(channelId, '好——我停了。')
       return
     }
 
@@ -1047,7 +1047,7 @@ export function apply(ctx, config = {}) {
         const next = await startFreshSession()
         await rest.sendMessage(
           channelId,
-          `开了段新的（\`${next}\`）。记忆本鱼还留着，上下文从头来。`,
+          `开了段新的（\`${next}\`）。记忆我还留着，上下文从头来。`,
         )
       } catch (error) {
         await rest.sendMessage(channelId, `换新上下文没成功：${error?.message || error}`)
@@ -1097,12 +1097,12 @@ export function apply(ctx, config = {}) {
       }
       if (budgetDesk.shouldRemind(budgetGate.key)) {
         const text = byQuota
-          ? `本鱼先歇一下——主人给${budgetGate.label}划的花费额度是 ` +
+          ? `我先歇一下——主人给${budgetGate.label}划的花费额度是 ` +
             `**${budgetGate.quota} ${budgetGate.currency}**，已经花掉 **${budgetGate.spent} ${budgetGate.currency}** 了。` +
-            `要把账本清零、或者把额度调大，本鱼才会接着说。`
-          : `本鱼先歇一下——余额只剩 **${budgetGate.total} ${budgetGate.currency}**，` +
+            `要把账本清零、或者把额度调大，我才会接着说。`
+          : `我先歇一下——余额只剩 **${budgetGate.total} ${budgetGate.currency}**，` +
             `主人给${budgetGate.label}画的线是 **${budgetGate.min} ${budgetGate.currency}**。` +
-            `充值以后本鱼自己就醒，不用叫。`
+            `充值以后我自己就醒，不用叫。`
         await rest.sendMessage(channelId, text).catch(() => {})
       }
       return

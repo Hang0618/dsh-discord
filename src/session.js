@@ -90,7 +90,7 @@ function tagOwnerNames(sessionId, log) {
     // ⚠ 以前这里写死 '主人'。但一个 Discord 会话里主人和批准的人共用上下文，
     //   钉死称呼就会在服务器里叫错人 → 现在留空，让 dsh-discord 每轮按说话人注入。
     clearPinnedOwnerName(cfg, sessionId)
-    if (!cfg.selfNames[sessionId]) cfg.selfNames[sessionId] = '蓝色大肥鱼'
+    if (!cfg.selfNames[sessionId]) cfg.selfNames[sessionId] = '助手'
     const tmp = `${cfgPath}.dsh-discord.tmp`
     writeFileSync(tmp, JSON.stringify(cfg, null, 2), 'utf8')
     renameSync(tmp, cfgPath)
@@ -191,7 +191,7 @@ export async function acquireAgent(ctx, cfg, log) {
     const meta = { cwd: cfg.cwd }
     // ⭐ 关键：带上 agentPreset。GUI 主会话的 header 里是 `agentPreset: "standard"`，
     //    预设决定的是「这个 agent 挂哪一套插件」—— AGENTS.md 人设（dsh-agent-instructions）、
-    //    提示词分段、工具集都在里面。不传就只有一个裸 agent：没有"蓝色大肥鱼"，也不认得主人。
+    //    提示词分段、工具集都在里面。不传就只有一个裸 agent：没有"助手"，也不认得主人。
     if (cfg.agentPreset) meta.agentPreset = cfg.agentPreset
     const handle = await ctx.agents.create({
       sessionId,

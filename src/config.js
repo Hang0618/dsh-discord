@@ -117,8 +117,8 @@ export function resolveConfig(raw = {}, log) {
     dmOnly: merged.dmOnly !== false,
     // 群聊总开关：服务器里跟人聊天（默认关；开了还要 GUILD_MESSAGES intent）
     guildChat: merged.guildChat === true,
-    // 主人没 @ 本鱼、但话里提到这些词时，本鱼主动插一句
-    triggerWords: asArray(merged.triggerWords || '鲸鱼娘,大肥鱼,肥鱼,本鱼,小鲸鱼,鱼鱼,鲸鱼'),
+    // 主人没 @ 我、但话里提到这些词时，我主动插一句
+    triggerWords: asArray(merged.triggerWords || ''),
     // 已批准的外部用户：{ userId: { name, chat, requireMention, at } }
     grants:
       merged.grants && typeof merged.grants === 'object' && !Array.isArray(merged.grants)
@@ -146,7 +146,7 @@ export function resolveConfig(raw = {}, log) {
         ? merged.guildNames
         : {},
     // 要不要把回复「引用」到对面那条消息上（Discord 的 reply）。
-    // 默认开：一眼能看出本鱼在回哪句话；不想要就在配置里写 replyToUser: false
+    // 默认开：一眼能看出我在回哪句话；不想要就在配置里写 replyToUser: false
     replyToUser: merged.replyToUser !== false,
     sessionId: String(merged.sessionId || 'session-discord-main'),
     cwd: String(merged.cwd || process.cwd()),
