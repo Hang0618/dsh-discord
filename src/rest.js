@@ -10,7 +10,7 @@
 //   - 日志里不打印 URL 里的 token（这里 token 走 header，本来也不会进 URL）。
 
 const API_BASE = 'https://discord.com/api/v10'
-const USER_AGENT = 'DiscordBot (https://github.com/Hang0618/dsh-discord, 0.3.8)'
+const USER_AGENT = 'DiscordBot (https://github.com/Hang0618/dsh-discord, 0.3.9)'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 

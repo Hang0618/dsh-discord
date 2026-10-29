@@ -26,7 +26,7 @@ export const name = 'dsh-discord'
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets']
 
 /** 日志里带版本号，方便确认热重载到底有没有换成新代码 */
-const VERSION = '0.3.8'
+const VERSION = '0.3.9'
 
 const HELP_TEXT = [
   '**本鱼在呢。** 直接说话就行，别的都不用管。',
@@ -923,14 +923,22 @@ export function apply(ctx, config = {}) {
       return
     }
 
-    // 群里的外部用户：必须先批准；批准时勾了「每次都要 @」就还得 @
+    // 群里的外部用户：必须先批准。
+    // 「每次都要 @」= 必须 @ 或引用；「不用每次 @」= @/引用之外，叫到 triggerWords 里的名字也行。
+    // 但都不再「随便说一句就接」——不然群里两个人聊天，本鱼句句都要回一嘴。
     if (!isDM && !isOwner && !isBot) {
       const grant = consentDesk.grantOf(senderId)
       const addressed = botMentioned || repliesToBot
-      const canChat = Boolean(grant) && (grant.requireMention === false || addressed)
+      const named =
+        Boolean(grant) &&
+        grant.requireMention === false &&
+        cfg.triggerWords.some(
+          (word) => word && cleanContent(data.content).toLowerCase().includes(word.toLowerCase()),
+        )
+      const canChat = Boolean(grant) && (addressed || named)
       if (!canChat) {
         if (!addressed) {
-          log('忽略：陌生人在群里没 @ 本鱼')
+          log(`忽略：没叫本鱼（${grant ? '批准过但没叫' : '陌生人'}，sender=${senderId}）`)
           return
         }
         const content = cleanContent(data.content)

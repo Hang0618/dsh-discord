@@ -1,6 +1,6 @@
 {
   "name": "dsh-discord",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "private": true,
   "description": "在 Discord 里跟 DSH 里的鲸鱼娘聊天：私聊只认主人，服务器里 @ 才接话（陌生人先经 GUI 确认），零依赖 bot 网关 + 流式回复 + 固定会话（记忆共用）",
   "type": "module",

@@ -233,7 +233,7 @@ window.__ModuleLoader__.load({
                 disabled: Boolean(busy),
                 onClick: () => void decide(entry, { allow: true, requireMention: false }),
               },
-              '允许，不用每次 @',
+              '允许，名字/@ 都行',
             ),
             h(
               'button',
@@ -316,7 +316,7 @@ window.__ModuleLoader__.load({
           'div',
           { style: S.hint },
           '私聊永远只认主人。服务器里别人想跟本鱼说话，得先 @ 本鱼，再由这里点头；',
-          '点了「每次都要 @」的人，以后每次都得 @，不点就随便说。',
+          '「每次都要 @」= 以后必须 @ 或引用本鱼；「不用每次 @」= @ 之外，叫本鱼的名字（关键词）也叫得动，但不会每句都接。',
           ' 别的机器人说话也会先挂在这儿：可以选「接收并跟它聊」或「只接收、不主动回」，决定会记住。',
         ),
         error ? h('div', { style: { ...S.snippet, color: 'rgb(220,110,110)' } }, error) : null,
@@ -334,7 +334,7 @@ window.__ModuleLoader__.load({
                   { key: userId, style: S.grantRow },
                   h('span', null, grant?.name || userId),
                   h('span', { style: S.user }, userId),
-                  h('span', { style: S.user }, grant?.requireMention === false ? '不用 @' : '每次都要 @'),
+                  h('span', { style: S.user }, grant?.requireMention === false ? '名字/@ 都行' : '每次都要 @'),
                   h(
                     'button',
                     {
