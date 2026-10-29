@@ -26,7 +26,7 @@ export const name = 'dsh-discord'
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets']
 
 /** 日志里带版本号，方便确认热重载到底有没有换成新代码 */
-const VERSION = '0.3.6'
+const VERSION = '0.3.7'
 
 const HELP_TEXT = [
   '**本鱼在呢。** 直接说话就行，别的都不用管。',
@@ -626,9 +626,30 @@ export function apply(ctx, config = {}) {
 
   // ---------- 入站：MESSAGE_CREATE ----------
 
+  /** 去掉 mention 标记、只留文字；命令判定和「是不是空消息」用它。 */
   function cleanContent(raw) {
     return String(raw || '')
       .replace(/<@!?(\d+)>/g, '')
+      .trim()
+  }
+
+  /**
+   * 投喂给模型的内容：把 <@id> / <@!id> 换成 @显示名，让本鱼知道在跟谁说话。
+   * cleanContent 会把 mention 整个抹掉，模型就永远看不到「@了谁」——主人指认人时全靠这个。
+   */
+  function renderContent(data) {
+    const raw = String(data?.content || '')
+    const names = new Map()
+    for (const user of Array.isArray(data?.mentions) ? data.mentions : []) {
+      const id = String(user?.id || '')
+      if (!id) continue
+      names.set(id, String(user.global_name || user.username || id).slice(0, 40))
+    }
+    if (state.botUserId && names.has(String(state.botUserId))) {
+      names.set(String(state.botUserId), '本鱼')
+    }
+    return raw
+      .replace(/<@!?(\d+)>/g, (whole, id) => (names.has(id) ? `@${names.get(id)}` : whole))
       .trim()
   }
 
@@ -838,8 +859,14 @@ export function apply(ctx, config = {}) {
       log(`主人批准过跟机器人 ${policy.name} 聊（本轮第 ${streak.count} 条），继续处理`)
     }
 
-    // 有人 @ 别人（又没 @ 本鱼）= 在跟别人说话，本鱼不插嘴（主人、别人一视同仁）
-    if (!isDM && !isBot && otherMentions.length > 0 && !botMentioned && !repliesToBot) {
+    // 主人 @ 别人 = 主动把这个人指给本鱼看（介绍/指认/让他搭话），要放行；
+    // 别人 @ 别人 = 在跟别人聊天，本鱼不插嘴。
+    const ownerHandsOver =
+      !isDM && isOwner && otherMentions.length > 0 && !botMentioned && !repliesToBot
+    if (ownerHandsOver) {
+      log(`主人 @ 了别人（${otherMentions.join(',')}），算在跟本鱼说话`)
+    }
+    if (!isDM && !isBot && !isOwner && otherMentions.length > 0 && !botMentioned && !repliesToBot) {
       log(`有人 @ 了别人，不插话（sender=${senderId}）`)
       return
     }
@@ -883,7 +910,7 @@ export function apply(ctx, config = {}) {
     }
 
     // 主人的群聊：没 @ 本鱼、没引用本鱼、也没提到关键词，就安静待着
-    if (!isDM && isOwner && !botMentioned && !repliesToBot) {
+    if (!isDM && isOwner && !botMentioned && !repliesToBot && !ownerHandsOver) {
       const content = cleanContent(data.content)
       const hit = cfg.triggerWords.some(
         (word) => word && content.toLowerCase().includes(word.toLowerCase()),
@@ -906,7 +933,8 @@ export function apply(ctx, config = {}) {
       isBot,
       guildId: data.guild_id ? String(data.guild_id) : null,
     }
-    const content = cleanContent(data.content)
+    const content = renderContent(data)
+    const command = cleanContent(data.content)
 
     // 纯附件（图片/文件）：一期不处理，明确回一句（只对主人/私聊，群里别刷屏）
     const hasAttachments = Array.isArray(data.attachments) && data.attachments.length > 0
@@ -918,12 +946,12 @@ export function apply(ctx, config = {}) {
     }
 
     // 命令只认主人：群里别人发 /stop 不能把本鱼停了
-    if (isOwner && (content === '/help' || content === '/开始')) {
+    if (isOwner && (command === '/help' || command === '/开始')) {
       await rest.sendMessage(channelId, HELP_TEXT)
       return
     }
 
-    if (isOwner && content === '/status') {
+    if (isOwner && command === '/status') {
       const status = state.agent?.status || 'offline'
       const model = state.agent?.options
         ? `${state.agent.options.provider}/${state.agent.options.model}`
@@ -944,7 +972,7 @@ export function apply(ctx, config = {}) {
       return
     }
 
-    if (isOwner && content === '/stop') {
+    if (isOwner && command === '/stop') {
       try {
         state.agent?.cancel?.({ kind: 'user' })
       } catch {}
@@ -954,7 +982,7 @@ export function apply(ctx, config = {}) {
       return
     }
 
-    if (isOwner && content === '/new') {
+    if (isOwner && command === '/new') {
       try {
         const next = await startFreshSession()
         await rest.sendMessage(
