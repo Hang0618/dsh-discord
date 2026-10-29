@@ -844,6 +844,12 @@ export function apply(ctx, config = {}) {
         log(`忽略：主人只让收着机器人的话，不接话（${policy.name}）`)
         return
       }
+      // 别的机器人：只有明确对着本鱼说话（@本鱼 / 引用本鱼）才接。
+      // 它们互相聊天、或者点名别人时本鱼不凑热闹——否则三个 bot 会开茶话会。
+      if (!botMentioned && !repliesToBot) {
+        log(`忽略：机器人 ${policy.name} 没点名本鱼，不凑热闹（${senderId}）`)
+        return
+      }
       const streak = state.botStreak.get(senderId) || { count: 0, since: Date.now() }
       if (Date.now() - streak.since > 5 * 60_000) {
         streak.count = 0
