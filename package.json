@@ -43,11 +43,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Hang618/dsh-discord.git"
+    "url": "git+https://github.com/Hang0618/dsh-discord.git"
   },
   "bugs": {
-    "url": "https://github.com/Hang618/dsh-discord/issues"
+    "url": "https://github.com/Hang0618/dsh-discord/issues"
   },
-  "homepage": "https://github.com/Hang618/dsh-discord#readme",
+  "homepage": "https://github.com/Hang0618/dsh-discord#readme",
   "license": "MIT"
 }

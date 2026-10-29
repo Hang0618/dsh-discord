@@ -1,5 +1,9 @@
 # dsh-discord
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%20%3E%3D24-brightgreen)](package.json)
+[![Cordis Plugin](https://img.shields.io/badge/Cordis-plugin-8a2be2)](https://github.com/deepseek-ai/deepseek-harness)
+
 在 **Discord 私聊和服务器**里跟 DSH（DeepSeek Harness）里的鲸鱼娘聊天。零依赖的 Cordis 插件：
 只用 Node 自带的 `fetch` 和全局 `WebSocket`，不装 discord.js。
 
@@ -93,13 +97,13 @@
 **方式一：从 GitHub 直装**
 
 ```bash
-dsh plugin add "https://github.com/Hang618/dsh-discord" --profile desktop
+dsh plugin add "https://github.com/Hang0618/dsh-discord" --profile desktop
 ```
 
 **方式二：clone 到本地再装**
 
 ```bash
-git clone https://github.com/Hang618/dsh-discord.git
+git clone https://github.com/Hang0618/dsh-discord.git
 dsh plugin add "$PWD/dsh-discord" --profile desktop
 ```
 
