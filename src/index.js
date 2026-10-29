@@ -26,7 +26,7 @@ export const name = 'dsh-discord'
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets']
 
 /** 日志里带版本号，方便确认热重载到底有没有换成新代码 */
-const VERSION = '0.4.0'
+const VERSION = '0.4.1'
 
 const HELP_TEXT = [
   '**我在呢。** 直接说话就行，别的都不用管。',

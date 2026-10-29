@@ -10,6 +10,14 @@
 
 import { splitMessage } from './chunker.js'
 
+// 模型偶尔会把 DeepSeek 的工具调用协议碎片（<｜｜DSML｜｜ … >）当正文吐出来。
+// 这些标记绝对不能原样发进 Discord：宁可整条丢掉，也不能让用户看见协议。
+const INTERNAL_MARKER_RE = /<\/?｜｜DSML｜｜[^>]*>/g
+
+export function stripInternalMarkers(text) {
+  return String(text ?? '').replace(INTERNAL_MARKER_RE, '')
+}
+
 export class StreamWriter {
   /**
    * @param {{rest: any, chunkLimit: number, editIntervalMs: number, log: Function}} options
@@ -126,8 +134,13 @@ export class StreamWriter {
 
   async _flush(force) {
     if (!this.group || !this.channelId) return
-    const text = this.group.text
-    if (!text.trim()) return
+    const raw = this.group.text
+    // 工具调用协议碎片不是给用户看的：整条都是就丢弃，夹在正文里就剥掉
+    const text = stripInternalMarkers(raw)
+    if (!text.trim()) {
+      if (raw.trim()) this.log(`[sanitize] 整条回复都是工具调用残留（${raw.length} 字），丢弃`)
+      return
+    }
 
     const segments = splitMessage(text, this.chunkLimit)
     if (!segments.length) return
