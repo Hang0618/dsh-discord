@@ -1,6 +1,6 @@
 // 0.5.0 新功能的离线测试：配置默认值、暗号匹配、额度只管别人、历史条数解析。
 // 直接跑：node tests-v050.mjs
-import { resolveConfig, resolveBudget, DEFAULT_CONFIG_PATH, mentionsTriggerWord, matchTokenReply } from './src/config.js'
+import { resolveConfig, resolveBudget, DEFAULT_CONFIG_PATH, mentionsTriggerWord, matchTokenReply, isFarewellText } from './src/config.js'
 import { createBudgetDesk } from './src/budget.js'
 import { isSilentReply, compactForDiscord } from './src/outbound.js'
 
@@ -93,6 +93,13 @@ ok('正文叫到名字也算点名', mentionsTriggerWord('诶——小助手是�
 ok('关键词不区分大小写', mentionsTriggerWord('HELLO 助手', ['助手']) === true)
 ok('没叫到 → false', mentionsTriggerWord('今天吃什么', ['小助手', '助手']) === false)
 ok('空词表 → false', mentionsTriggerWord('小助手', []) === false)
+
+// 2.7 告别语：以「晚安/再见」这类话收尾时，对方本来就不需要回，催问不该催
+ok('晚安收尾 → 不催', isFarewellText('好呀，那晚安啦～') === true)
+ok('再见收尾 → 不催', isFarewellText('那就这样，再见！') === true)
+ok('拜拜收尾 → 不催', isFarewellText('你先忙，拜拜') === true)
+ok('普通问句 → 照催', isFarewellText('你觉得这样行吗？') === false)
+ok('正文中间提到晚安 → 不误伤', isFarewellText('我在写晚安曲的作业') === false)
 
 // 3. 额度只管服务器里的其他人
 function deskWithQuota(quota) {

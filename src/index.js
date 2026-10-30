@@ -18,6 +18,7 @@ import {
   DEFAULT_CONFIG_PATH,
   mentionsTriggerWord,
   matchTokenReply,
+  isFarewellText,
 } from './config.js'
 import { DiscordRest } from './rest.js'
 import { DiscordGateway } from './gateway.js'
@@ -33,7 +34,7 @@ export const name = 'dsh-discord'
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets']
 
 /** 日志里带版本号，方便确认热重载到底有没有换成新代码 */
-const VERSION = '0.6.14'
+const VERSION = '0.6.15'
 
 const HELP_TEXT = [
   '**我在呢。** 直接说话就行，别的都不用管。',
@@ -1016,6 +1017,11 @@ export function apply(ctx, config = {}) {
     if (conf.enabled === false) return
     // 私聊不催：对面就是主人，催起来像在讨债
     if (job.isDM) return
+    // 这一轮以「晚安/再见/先这样」这类告别语收尾 → 对方本来就不需要回，不催
+    if (isFarewellText(writer.lastSent?.content, conf.farewellWords)) {
+      log('本轮以告别语收尾，不催问')
+      return
+    }
     const target = job?.speaker
     if (!target?.id) return
     if (state.botUserId && String(target.id) === String(state.botUserId)) return

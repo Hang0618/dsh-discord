@@ -61,6 +61,26 @@ export const DEFAULT_EMOJI_REPLIES = {
   ':raised_hand::smiling_imp::raised_back_of_hand:': 'token回！:wave: :smiling_imp::wave:',
 }
 
+/** 默认的「说完这句就不用回」的告别语：催问遇到它们就收手。 */
+export const DEFAULT_FAREWELL_WORDS = [
+  '晚安', '晚安啦', '晚安咯', '早点睡', '睡了', '先睡', '再见', '拜拜', '拜～', '回头见',
+  '下次见', '下次聊', '先这样', '就这样', '先撤', '告辞', '明天见', '明天聊', '有空再聊',
+  '不聊啦', '撤了', '先忙', '去忙',
+]
+
+/** 这句话是不是以告别语收尾（对方看到这种话本来就不需要回，催问也不该催）。 */
+export function isFarewellText(text, words = DEFAULT_FAREWELL_WORDS) {
+  const plain = String(text || '')
+    .replace(/\n?-# [^\n]*$/g, '') // 每轮 token footer 不算正文
+    .trim()
+  if (!plain) return false
+  // 只看最后一句：按句末标点/换行切，去掉尾部标点再比
+  const last = plain.split(/[。！？!?…~～\n]/).filter((part) => part.trim()).pop() || plain
+  const tail = last.trim().replace(/[\s。！？!?…~～、，,.]+$/g, '')
+  if (!tail) return false
+  return words.some((word) => word && tail.endsWith(word))
+}
+
 /** 数 needle 在 haystack 里出现几次（不重叠）。 */
 function countOccurrences(haystack, needle) {
   if (!needle) return 0
@@ -275,6 +295,10 @@ export function resolveConfig(raw = {}, log) {
       giveUpText: String(
         merged.pingBack?.giveUpText || '好像没人在了，那我先不打扰啦。',
       ),
+      // 以这些词收尾的回复不催问（对方看到告别语本来就不需要回）
+      farewellWords: Array.isArray(merged.pingBack?.farewellWords)
+        ? merged.pingBack.farewellWords.map((word) => String(word)).filter(Boolean)
+        : DEFAULT_FAREWELL_WORDS,
     },
 
     cwd: String(merged.cwd || process.cwd()),
