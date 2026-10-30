@@ -43,6 +43,22 @@ function asMoneyOrInherit(value) {
   return asMoney(value)
 }
 
+// 暗号：常见表情的 :shortcode: → Unicode。聊天里发出来的是 Unicode，
+// 配置里写短码更顺手，所以两边的写法都认。
+export const EMOJI_SHORTCODES = {
+  raised_hand: '🖐️',
+  rage: '😡',
+  raised_back_of_hand: '🤚',
+  smiling_imp: '😈',
+  wave: '👋',
+}
+
+/** 默认暗号表：键 = 触发串，值 = 回什么。谁发都认，不调模型。 */
+export const DEFAULT_EMOJI_REPLIES = {
+  ':raised_hand::rage::raised_back_of_hand:': 'token回！:raised_hand::rage::raised_back_of_hand:',
+  ':raised_hand::smiling_imp::raised_back_of_hand:': 'token回！:wave: :smiling_imp::wave:',
+}
+
 /**
  * 余额/消费预算配置：
  *   { enabled, global, dm, globalQuota, dmQuota, guilds:{ [guildId]: {name,min,quota} }, refreshMs, remindMs }
@@ -67,6 +83,8 @@ export function resolveBudget(raw) {
   return {
     // 默认开着；但阈值默认全是 0 = 不设限，主人填了数字才真的会暂停
     enabled: src.enabled !== false,
+    // 主人自己聊天不计额度：额度只管服务器里的其他人（面板上能关）
+    skipOwners: src.skipOwners !== false,
     global: asMoney(src.global),
     dm: asMoneyOrInherit(src.dm),
     // 消费额度：这个私聊/服务器累计最多花多少（null = 跟全局走，0 = 不限）
@@ -149,6 +167,21 @@ export function resolveConfig(raw = {}, log) {
     // 默认开：一眼能看出我在回哪句话；不想要就在配置里写 replyToUser: false
     replyToUser: merged.replyToUser !== false,
     sessionId: String(merged.sessionId || 'session-discord-main'),
+    // 群聊会话和私聊分开：每个服务器一个自己的会话，互不串上下文。
+    // 没指定时按前缀自动生成，运行时写回配置文件。
+    guildSessionPrefix: String(merged.guildSessionPrefix || 'session-discord-guild-'),
+    guildSessions:
+      merged.guildSessions && typeof merged.guildSessions === 'object' && !Array.isArray(merged.guildSessions)
+        ? { ...merged.guildSessions }
+        : {},
+    // 群聊里先读最近多少条聊天记录（0 = 不读；只对服务器生效，私聊不读）
+    guildHistoryLimit: Math.max(0, Math.min(100, Math.floor(Number(merged.guildHistoryLimit ?? 10) || 0))),
+    // 暗号：谁发这些表情串，就回一句固定的，不调模型
+    emojiReplies:
+      merged.emojiReplies && typeof merged.emojiReplies === 'object' && !Array.isArray(merged.emojiReplies)
+        ? { ...DEFAULT_EMOJI_REPLIES, ...merged.emojiReplies }
+        : { ...DEFAULT_EMOJI_REPLIES },
+
     cwd: String(merged.cwd || process.cwd()),
     // agent preset：决定这个 agent 挂哪一套插件（人设 AGENTS.md、提示词分段、工具集）。
     // GUI 主会话用的是 standard；不传就只有裸 agent，人设和记忆注入全都没有。

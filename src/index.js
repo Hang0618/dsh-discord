@@ -11,7 +11,13 @@
 
 import { randomUUID } from 'node:crypto'
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs'
-import { resolveConfig, resolveBudget, INTENTS, DEFAULT_CONFIG_PATH } from './config.js'
+import {
+  resolveConfig,
+  resolveBudget,
+  INTENTS,
+  DEFAULT_CONFIG_PATH,
+  EMOJI_SHORTCODES,
+} from './config.js'
 import { DiscordRest } from './rest.js'
 import { DiscordGateway } from './gateway.js'
 import { StreamWriter } from './outbound.js'
@@ -26,13 +32,13 @@ export const name = 'dsh-discord'
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets']
 
 /** 日志里带版本号，方便确认热重载到底有没有换成新代码 */
-const VERSION = '0.4.1'
+const VERSION = '0.5.0'
 
 const HELP_TEXT = [
   '**我在呢。** 直接说话就行，别的都不用管。',
   '',
   '私聊里随便说；服务器里 @ 我，或者主人在群里提到我，我才接话。',
-  '`/new` 开一段新对话（记忆还在，只是上下文重来）',
+  '`/new` 开一段新对话（只作废当前会话：私聊/这个服务器，记忆还在）',
   '`/stop` 打断我正在打的字',
   '`/status` 看现在用的模型和会话',
 ].join('\n')
@@ -69,6 +75,7 @@ export function apply(ctx, config = {}) {
       raw.budget = cfg.budget
       raw.spend = cfg.spend
       raw.guildNames = cfg.guildNames
+      raw.guildSessions = cfg.guildSessions
       const tmp = `${cfg.configPath}.tmp`
       writeFileSync(tmp, JSON.stringify(raw, null, 2), 'utf8')
       renameSync(tmp, cfg.configPath)
@@ -178,6 +185,7 @@ export function apply(ctx, config = {}) {
                     ok: true,
                     ...budgetDesk.status(),
                     guilds: budgetDesk.guildList(),
+                    guildHistoryLimit: cfg.guildHistoryLimit,
                     notice: state.lastPause,
                   })
                 }
@@ -187,6 +195,8 @@ export function apply(ctx, config = {}) {
                   const current = cfg.budget || {}
                   cfg.budget = resolveBudget({
                     enabled: typeof src.enabled === 'boolean' ? src.enabled : current.enabled,
+                    skipOwners:
+                      typeof src.skipOwners === 'boolean' ? src.skipOwners : current.skipOwners,
                     global: src.global !== undefined ? src.global : current.global,
                     dm: src.dm !== undefined ? src.dm : current.dm,
                     globalQuota:
@@ -198,6 +208,13 @@ export function apply(ctx, config = {}) {
                   })
                   if (src.guildNames && typeof src.guildNames === 'object') {
                     cfg.guildNames = { ...(cfg.guildNames || {}), ...src.guildNames }
+                  }
+                  const historyLimit = body?.guildHistoryLimit ?? src.guildHistoryLimit
+                  if (historyLimit !== undefined) {
+                    cfg.guildHistoryLimit = Math.max(
+                      0,
+                      Math.min(100, Math.floor(Number(historyLimit) || 0)),
+                    )
                   }
                   budgetDesk.resetReminders()
                   persistAccess()
@@ -275,6 +292,10 @@ export function apply(ctx, config = {}) {
   const state = {
     agent: null,
     handle: null,
+    // 会话级缓存：私聊一个、每个服务器各一个，互不串上下文
+    agents: new Map(),
+    handles: new Map(),
+    activeSessionId: null,
     botUserId: null,
     channelId: null,
     // 这一轮是谁在说话：{ id, name, isOwner, isDM, isBot, guildId } —— 称呼就跟着它走
@@ -305,7 +326,7 @@ export function apply(ctx, config = {}) {
     () => {
       const off = ctx.on('session/event', (session, event) => {
         try {
-          if (!session || session.id !== cfg.sessionId) return
+          if (!isOurSession(session)) return
           const type = event?.type
           if (type === 'assistant/message') {
             const usage = event.data?.usage
@@ -441,23 +462,57 @@ export function apply(ctx, config = {}) {
     }
   }
 
-  async function ensureReady() {
-    if (state.agent) return state.agent
-    if (state.initPromise) return state.initPromise
-    state.initPromise = (async () => {
+  /** 私聊用配置里的主会话；群聊按服务器各分一个，第一次说话时懒创建。 */
+  function sessionIdFor(scope) {
+    if (!scope || scope.isDM) return cfg.sessionId
+    const guildId = scope.guildId ? String(scope.guildId) : ''
+    if (!guildId) return cfg.sessionId
+    const sessions = (cfg.guildSessions ||= {})
+    if (sessions[guildId]) return String(sessions[guildId])
+    const fresh = `${cfg.guildSessionPrefix || 'session-discord-guild-'}${guildId}`
+    sessions[guildId] = fresh
+    persistAccess()
+    log(`服务器 ${guildId} 用独立会话：${fresh}`)
+    return fresh
+  }
+
+  function isOurSession(session) {
+    if (!session) return false
+    const id = String(session.id || '')
+    if (id === String(cfg.sessionId)) return true
+    return Object.values(cfg.guildSessions || {}).some((sid) => String(sid) === id)
+  }
+
+  function isOurAgent(agent) {
+    for (const item of state.agents.values()) if (item === agent) return true
+    return false
+  }
+
+  const initPromises = new Map()
+
+  async function ensureReady(sessionId = cfg.sessionId) {
+    const sid = String(sessionId || cfg.sessionId)
+    const cached = state.agents.get(sid)
+    if (cached) return cached
+    const inflight = initPromises.get(sid)
+    if (inflight) return inflight
+    const promise = (async () => {
       if (cfg.seedMemory && cfg.seedMemoryFrom) {
-        seedMemory({ fromSession: cfg.seedMemoryFrom, toSession: cfg.sessionId, log })
+        seedMemory({ fromSession: cfg.seedMemoryFrom, toSession: sid, log })
       }
       // 老版本把称呼写死成「主人」并落盘了，这里顺手洗掉（幂等）
-      neutralizeOwnerName(cfg.sessionId, log)
-      const { agent, handle } = await acquireAgent(ctx, cfg, log)
+      neutralizeOwnerName(sid, log)
+      const { agent, handle } = await acquireAgent(ctx, cfg, log, sid)
+      state.agents.set(sid, agent)
+      state.handles.set(sid, handle)
       state.agent = agent
       state.handle = handle
+      state.activeSessionId = sid
       state.lastError = null
       injectExtraPrompt(agent)
       injectSpeakerPrompt(agent)
       log(
-        `agent 就绪（${cfg.sessionId}），状态：${agent.status} ` +
+        `agent 就绪（${sid}），状态：${agent.status} ` +
           `模型：${agent.options?.provider || '?'}/${agent.options?.model || '?'}`,
       )
       return agent
@@ -468,9 +523,10 @@ export function apply(ctx, config = {}) {
         throw error
       })
       .finally(() => {
-        state.initPromise = null
+        initPromises.delete(sid)
       })
-    return state.initPromise
+    initPromises.set(sid, promise)
+    return promise
   }
 
   /**
@@ -480,11 +536,17 @@ export function apply(ctx, config = {}) {
    * 等于什么都没清。现在换 id：旧会话留盘上不动，新会话把记忆文件复制一份过去，
    * 于是「记忆还在、上下文从头」，并把新 id 写回配置，重启也接着用。
    */
-  async function startFreshSession() {
-    const old = state.agent
-    const oldHandle = state.handle
-    state.agent = null
-    state.handle = null
+  async function startFreshSession(scope = {}) {
+    const from = sessionIdFor({ isDM: Boolean(scope.isDM), guildId: scope.guildId })
+    const old = state.agents.get(from)
+    const oldHandle = state.handles.get(from)
+    state.agents.delete(from)
+    state.handles.delete(from)
+    if (state.activeSessionId === from) {
+      state.agent = null
+      state.handle = null
+      state.activeSessionId = null
+    }
     try {
       old?.cancel?.({ kind: 'user' })
     } catch {}
@@ -495,14 +557,21 @@ export function apply(ctx, config = {}) {
     }
     writer.reset()
 
-    const from = cfg.sessionId
     // 固定前缀 + 时间戳，避免 /new 几次之后 id 越拼越长
-    const base = from.split('-').slice(0, 2).join('-') || 'session-discord'
+    const parts = String(from).split('-')
+    const base = parts.length > 1 ? parts.slice(0, -1).join('-') : 'session-discord'
     const next = `${base}-${Date.now().toString(36)}`
     seedMemory({ fromSession: from, toSession: next, log })
-    cfg.sessionId = next
-    persistSessionId(next)
-    await ensureReady()
+    if (scope.isDM || !scope.guildId) {
+      cfg.sessionId = next
+      persistSessionId(next)
+    } else {
+      const guildId = String(scope.guildId)
+      cfg.guildSessions = { ...(cfg.guildSessions || {}), [guildId]: next }
+      persistAccess()
+      log(`服务器 ${guildId} 换了新会话：${next}（私聊和别的服务器不受影响）`)
+    }
+    await ensureReady(next)
     return next
   }
 
@@ -522,11 +591,17 @@ export function apply(ctx, config = {}) {
     }
   }
 
-  async function restartAgent() {
-    const old = state.agent
-    const oldHandle = state.handle
-    state.agent = null
-    state.handle = null
+  async function restartAgent(sessionId = cfg.sessionId) {
+    const sid = String(sessionId || cfg.sessionId)
+    const old = state.agents.get(sid)
+    const oldHandle = state.handles.get(sid)
+    state.agents.delete(sid)
+    state.handles.delete(sid)
+    if (state.activeSessionId === sid) {
+      state.agent = null
+      state.handle = null
+      state.activeSessionId = null
+    }
     try {
       old?.cancel?.({ kind: 'user' })
     } catch {}
@@ -536,7 +611,7 @@ export function apply(ctx, config = {}) {
       log(`销毁旧会话失败：${error?.message || error}`)
     }
     writer.reset()
-    return ensureReady()
+    return ensureReady(sid)
   }
 
   // ---------- typing ----------
@@ -577,7 +652,7 @@ export function apply(ctx, config = {}) {
   // ---------- 出站：assistant-stream ----------
 
   const offStream = ctx.on('agent/assistant-stream', ({ agent, frame }) => {
-    if (!state.agent || agent !== state.agent) return
+    if (!isOurAgent(agent)) return
     if (!state.channelId) return
 
     if (frame.type === 'start') {
@@ -599,7 +674,7 @@ export function apply(ctx, config = {}) {
 
   // agent 回到 idle：停 typing，收掉还没推上去的尾巴
   const offStatus = ctx.on('agent/status', ({ agent, status }) => {
-    if (!state.agent || agent !== state.agent) return
+    if (!isOurAgent(agent)) return
     log(`agent 状态：${status}`)
     if (status === 'idle') {
       stopTyping()
@@ -611,7 +686,7 @@ export function apply(ctx, config = {}) {
 
   // 一轮出错（比如模型没配好、prompt 变量缺值）：至少让人知道自己被听见了
   const offSession = ctx.on('session/event', (session, event) => {
-    if (!state.agent || session !== state.agent.session) return
+    if (!isOurSession(session)) return
     if (event?.type !== 'turn/end') return
     const reason = event.data?.reason
     if (reason?.kind !== 'error') return
@@ -687,6 +762,85 @@ export function apply(ctx, config = {}) {
     return `[回复 / 引用了 ${name} 的消息：「${clipped || '（没有文字，可能只是图片或附件）'}」]`
   }
 
+  // ---------- 表情暗号 ----------
+
+  function emojiShortcodeToUnicode(text) {
+    return String(text).replace(/:([a-z0-9_+-]+):/g, (whole, name) =>
+      EMOJI_SHORTCODES[name] !== undefined ? EMOJI_SHORTCODES[name] : whole,
+    )
+  }
+
+  function normalizeEmoji(text) {
+    return String(text).replace(/[\uFE0F\u200D]/g, '')
+  }
+
+  /** 消息里有没有哪条暗号；有就返回要回的那句（已转成 Unicode），没有返回 null。 */
+  function matchEmojiReply(content) {
+    const plain = normalizeEmoji(content)
+    for (const [trigger, reply] of Object.entries(cfg.emojiReplies || {})) {
+      if (!trigger) continue
+      const variants = [trigger, emojiShortcodeToUnicode(trigger)]
+      if (variants.some((variant) => variant && plain.includes(normalizeEmoji(variant)))) {
+        return emojiShortcodeToUnicode(reply)
+      }
+    }
+    return null
+  }
+
+  // ---------- 群聊历史 ----------
+
+  async function fetchGuildHistory(channelId, limit, currentMessageId) {
+    const rows = await rest.request(
+      'GET',
+      `/channels/${channelId}/messages?limit=${Math.max(1, Math.min(100, Math.floor(limit) + 1))}`,
+    )
+    const list = Array.isArray(rows) ? rows : []
+    return list
+      .filter((message) => String(message.id) !== String(currentMessageId))
+      .slice(0, limit)
+  }
+
+  function renderHistoryRow(message) {
+    const isMe = Boolean(state.botUserId && String(message.author?.id) === String(state.botUserId))
+    const name = isMe
+      ? '我'
+      : String(
+          message.author?.global_name || message.author?.username || message.author?.id || '某人',
+        ).slice(0, 40)
+    const body = cleanContent(message.content)
+    const fallback =
+      Array.isArray(message.attachments) && message.attachments.length > 0 ? '（发了图片/文件）' : ''
+    const text = body || fallback
+    const clipped = text.length > 300 ? `${text.slice(0, 300)}…` : text
+    return `${name}：${clipped || '（空消息）'}`
+  }
+
+  /** 群聊：把最近几条聊天记录附在当前消息前面，这样回「第 3 条」时不会答成最新的。 */
+  async function withGuildHistory(content, channelId, currentMessageId) {
+    let rows
+    try {
+      rows = await fetchGuildHistory(channelId, cfg.guildHistoryLimit, currentMessageId)
+    } catch (error) {
+      log(`读群聊历史失败：${error?.message || error}`)
+      return content
+    }
+    if (!rows.length) return content
+    // 从最新往回挑，总字数别超过 3000，最后再按时间正序拼
+    let budget = 3000
+    const lines = []
+    for (const message of rows) {
+      const line = renderHistoryRow(message)
+      if (budget - line.length < 0) break
+      budget -= line.length
+      lines.push(line)
+    }
+    lines.reverse()
+    return (
+      `[最近聊天记录（${lines.length} 条，旧→新；当前消息在最后）]\n` +
+      `${lines.join('\n')}\n\n[当前消息]\n${content}`
+    )
+  }
+
   function makeUserMessage(text) {
     return Object.freeze({
       id: randomUUID(),
@@ -739,7 +893,7 @@ export function apply(ctx, config = {}) {
     const deadline = Date.now() + timeoutMs
     const startedAt = Date.now()
     while (Date.now() < deadline) {
-      const agent = state.agent
+      const agent = state.activeSessionId ? state.agents.get(state.activeSessionId) : null
       if (!agent) return true
       // 刚投喂的 1.5 秒内不算空闲——不然还没起步就被判成「已经结束」
       if (agent.status !== 'running' && Date.now() - startedAt > 1500) return true
@@ -779,9 +933,12 @@ export function apply(ctx, config = {}) {
     // 这一轮的花费记到谁头上（私聊 / 某个服务器）
     state.chargeScope = { isDM, guildId: speaker?.guildId ?? null }
     state.turnCost = 0
+    const sessionId = sessionIdFor({ isDM, guildId: speaker?.guildId ?? null })
+    state.activeSessionId = sessionId
     writer.setTarget(channelId, cfg.replyToUser ? replyToId : null)
     try {
-      const agent = await ensureReady()
+      const agent = await ensureReady(sessionId)
+      state.agent = agent
       if (agent.status !== 'running') startTyping(channelId)
       agent.followup(makeUserMessage(content))
       log(
@@ -840,6 +997,17 @@ export function apply(ctx, config = {}) {
       referenced && state.botUserId && String(referenced.author?.id) === String(state.botUserId),
     )
     if (repliesToBot) log('这条是引用回复我的消息（不用 @ 也算）')
+
+    // 暗号：发这串表情就回固定的一句话，不调模型（谁发都认，优先于准入/额度）。
+    // 只认真人，机器人之间不互相触发，免得两个 bot 拿暗号刷屏。
+    const emojiReply = isBot ? null : matchEmojiReply(rawContent)
+    if (emojiReply) {
+      await rest
+        .sendMessage(channelId, emojiReply, { replyTo: data.id })
+        .catch((error) => log(`暗号回复失败：${error?.message || error}`))
+      log(`暗号命中（sender=${senderId}），回了固定一句`)
+      return
+    }
 
     // 渠道闸门：私聊只认主人；群聊默认关，开了才进
     if (isDM) {
@@ -993,7 +1161,7 @@ export function apply(ctx, config = {}) {
       isBot,
       guildId: data.guild_id ? String(data.guild_id) : null,
     }
-    const content = renderContent(data)
+    let content = renderContent(data)
     const command = cleanContent(data.content)
 
     // 纯附件（图片/文件）：一期不处理，明确回一句（只对主人/私聊，群里别刷屏）
@@ -1012,9 +1180,11 @@ export function apply(ctx, config = {}) {
     }
 
     if (isOwner && command === '/status') {
-      const status = state.agent?.status || 'offline'
-      const model = state.agent?.options
-        ? `${state.agent.options.provider}/${state.agent.options.model}`
+      const statusSession = sessionIdFor({ isDM, guildId: state.speaker?.guildId })
+      const statusAgent = state.agents.get(statusSession) || state.agent
+      const status = statusAgent?.status || 'offline'
+      const model = statusAgent?.options
+        ? `${statusAgent.options.provider}/${statusAgent.options.model}`
         : '未连接'
       const bal = await budgetDesk.balance(false)
       const line = budgetDesk.thresholdOf({ isDM, guildId: state.speaker?.guildId })
@@ -1027,7 +1197,7 @@ export function apply(ctx, config = {}) {
       const quotaLine = `已花：\`${Number(spent).toFixed(4)} ${bal.currency || 'CNY'}\`（额度 ${quota.quota || '不限'}）`
       await rest.sendMessage(
         channelId,
-        `**状态**\n会话：\`${cfg.sessionId}\`\n模型：\`${model}\`\nagent：\`${status}\`\n记忆：${cfg.seedMemory ? '已过继（首次启动）' : '未预置'}\n${budgetLine}\n${quotaLine}`,
+        `**状态**\n会话：\`${statusSession}\`（${isDM ? '私聊' : `服务器 ${state.speaker?.guildId || ''}`}）\n模型：\`${model}\`\nagent：\`${status}\`\n记忆：${cfg.seedMemory ? '已过继（首次启动）' : '未预置'}\n${budgetLine}\n${quotaLine}`,
       )
       return
     }
@@ -1044,7 +1214,7 @@ export function apply(ctx, config = {}) {
 
     if (isOwner && command === '/new') {
       try {
-        const next = await startFreshSession()
+        const next = await startFreshSession({ isDM, guildId: state.speaker?.guildId })
         await rest.sendMessage(
           channelId,
           `开了段新的（\`${next}\`）。记忆我还留着，上下文从头来。`,
@@ -1056,7 +1226,7 @@ export function apply(ctx, config = {}) {
     }
 
     // 余额预算：跌到主人画的那条线以下就先闭嘴，别再烧 token
-    const budgetGate = await budgetDesk.check({ isDM, guildId: state.speaker.guildId })
+    const budgetGate = await budgetDesk.check({ isDM, guildId: state.speaker.guildId, isOwner })
     if (budgetGate.paused) {
       const fromText =
         budgetGate.from === 'own' ? '专属线' : budgetGate.from === 'global' ? '全局线' : '不限'
@@ -1108,6 +1278,11 @@ export function apply(ctx, config = {}) {
       return
     }
 
+    // 群聊：把上面几条聊天记录也带上，不然容易「回复第 3 条、却答成最新那条」
+    if (!isDM && cfg.guildHistoryLimit > 0) {
+      content = await withGuildHistory(content, channelId, data.id)
+    }
+
     // 普通聊天：先排队，主人优先（同一时间只喂一条，别人不能插在主人前面）
     enqueueChat({
       content,
@@ -1154,19 +1329,25 @@ export function apply(ctx, config = {}) {
       offStatus?.()
       offSession?.()
       gateway.stop()
-      try {
-        state.agent?.cancel?.({ kind: 'user' })
-      } catch {}
-      try {
-        state.handle?.dispose?.()
-      } catch {}
+      for (const agent of state.agents.values()) {
+        try {
+          agent?.cancel?.({ kind: 'user' })
+        } catch {}
+      }
+      for (const handle of state.handles.values()) {
+        try {
+          handle?.dispose?.()
+        } catch {}
+      }
     }
   })
 
   log(
     `dsh-discord v${VERSION} 已加载：owner=${cfg.ownerIds.join(',') || '（未配置，谁都不理）'} ` +
       `dmOnly=${cfg.dmOnly} 群聊=${cfg.guildChat ? '开' : '关'} ` +
-      `已批准=${Object.keys(cfg.grants).length} 人/机器人=${Object.keys(cfg.botPolicy).length} 会话=${cfg.sessionId} 预设=${cfg.agentPreset || '（无）'} cwd=${cfg.cwd}` +
+      `已批准=${Object.keys(cfg.grants).length} 人/机器人=${Object.keys(cfg.botPolicy).length} 私聊会话=${cfg.sessionId} ` +
+      `群聊会话=${Object.keys(cfg.guildSessions).length}个/历史${cfg.guildHistoryLimit}条 预设=${cfg.agentPreset || '（无）'} cwd=${cfg.cwd} ` +
+      `主人不计额度=${cfg.budget.skipOwners !== false ? '开' : '关'} 暗号=${Object.keys(cfg.emojiReplies).length}条` +
       ` 余额线=${cfg.budget.enabled ? `全局:${cfg.budget.global || '不限'}/私聊:${cfg.budget.dm === null || cfg.budget.dm === undefined ? '跟全局' : cfg.budget.dm || '不限'}/服务器:${Object.keys(cfg.budget.guilds).length}个` : '关'}`,
   )
   // 诊断：列一下这个 profile 里注册了哪些 preset，确认要用的那个真的存在

@@ -151,8 +151,9 @@ async function bindPreset(ctx, agent, presetId, log) {
  * 顺序：内存里已有同 id → 直接复用；否则 create；create 报「已存在」（说明是
  * 落过盘的会话）→ 用 resume 接回来；都不行 → 把错误抛给上层，由入口决定降级。
  */
-export async function acquireAgent(ctx, cfg, log) {
-  const sessionId = cfg.sessionId
+export async function acquireAgent(ctx, cfg, log, sessionIdOverride) {
+  // 私聊 / 每个服务器各自一个会话：传进来用传进来的，不传就用配置里的主会话
+  const sessionId = String(sessionIdOverride || cfg.sessionId)
 
   const existing = ctx.agents.get?.(sessionId)
   if (existing) {

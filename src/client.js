@@ -401,10 +401,12 @@ window.__ModuleLoader__.load({
         const asText = (v) => (v === null || v === undefined ? '' : String(v))
         setDraft({
           enabled: b.enabled !== false,
+          skipOwners: b.skipOwners !== false,
           global: b.global ? String(b.global) : '',
           dm: asText(b.dm),
           globalQuota: asText(b.globalQuota),
           dmQuota: asText(b.dmQuota),
+          guildHistoryLimit: asText(next?.guildHistoryLimit ?? 10),
         })
         const rows = Array.isArray(next?.guilds) ? next.guilds : []
         const map = {}
@@ -473,6 +475,9 @@ window.__ModuleLoader__.load({
           }
           const res = await jpost('/budget', {
             enabled: draft.enabled,
+            skipOwners: draft.skipOwners !== false,
+            guildHistoryLimit:
+              textOf(draft.guildHistoryLimit) === '' ? 0 : Number(draft.guildHistoryLimit),
             global: textOf(draft.global) === '' ? 0 : Number(draft.global),
             dm: textOf(draft.dm) === '' ? null : Number(draft.dm),
             globalQuota: textOf(draft.globalQuota) === '' ? null : Number(draft.globalQuota),
@@ -546,11 +551,11 @@ window.__ModuleLoader__.load({
       const currency = bal?.currency || 'CNY'
       const money = (v) => Number(v || 0).toFixed(4)
 
-      const numInput = (value, onChange, placeholder) =>
+      const numInput = (value, onChange, placeholder, step) =>
         h('input', {
           type: 'number',
           min: '0',
-          step: '0.01',
+          step: step || '0.01',
           value,
           placeholder: placeholder || '留空 = 跟全局',
           onChange: (e) => onChange(e.target.value),
@@ -616,6 +621,7 @@ window.__ModuleLoader__.load({
           'div',
           { style: S.hint },
           '两道闸门：①余额跌到线以下（≤）就停，充值回升自动恢复；②花费到了额度也停，要清零或调大额度才继续。',
+          '额度只管服务器里的其他人；主人自己聊天默认不卡额度（上面有开关）。',
           '「全局」管所有地方；「私聊」「某个服务器」留空 = 跟全局走，填 0 = 这里不限（可拿它豁免全局）。',
           '花费按 DeepSeek 官方价折算（缓存命中/未命中/输出），高峰时段按高峰价。',
         ),
@@ -629,6 +635,35 @@ window.__ModuleLoader__.load({
             onChange: (e) => patchDraft({ enabled: e.target.checked }),
           }),
           h('span', { style: S.user }, bal?.ok && bal.at ? `上次读到：${new Date(bal.at).toLocaleTimeString()}` : ''),
+        ),
+        h(
+          'div',
+          { style: S.actions },
+          h('span', null, '主人聊天不计额度'),
+          h('input', {
+            type: 'checkbox',
+            checked: draft.skipOwners !== false,
+            onChange: (e) => patchDraft({ skipOwners: e.target.checked }),
+          }),
+          h(
+            'span',
+            { style: S.user },
+            draft.skipOwners !== false
+              ? '开：只有服务器里的其他人会碰到额度，主人自己聊天不受限制'
+              : '关：主人自己也会被额度卡住',
+          ),
+        ),
+        h(
+          'div',
+          { style: S.actions },
+          h('span', null, '群聊先读几条历史'),
+          numInput(
+            draft.guildHistoryLimit,
+            (v) => patchDraft({ guildHistoryLimit: v }),
+            '0 = 不读，默认 10',
+            '1',
+          ),
+          h('span', { style: S.user }, '只对服务器生效；私聊不读历史'),
         ),
         h(
           'div',

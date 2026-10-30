@@ -14,6 +14,9 @@
 - 收消息 → 转成 DSH 的用户消息 → 交给 agent，模型边说边把字**编辑进同一条消息**（流式）
 - 用一个**固定的 SessionId**，所以人设、记忆跟 GUI 那边是同一套
 - 三个小命令（只认主人）：`/new`（换上下文）、`/stop`（打断）、`/status`
+- **私聊和每个服务器用不同会话**：私聊跟 GUI 主会话共用记忆，每个服务器单独一套，互不串味
+- 群聊会先读频道里**最近几条**聊天记录（默认 10 条，可调），不会「回第 3 句却回了最新一句」
+- 两句 emoji 暗号直接固定回复，不花 token、不惊动模型
 
 ### 谁能跟它说话
 
@@ -36,6 +39,30 @@
 
 **引用回复（reply）**：配置 `replyToUser` 默认 `true`，它回话时会把消息引用到对面那条上，
 一眼看得出在回哪句；不想要就在 `discord-bridge.json` 里写 `"replyToUser": false`。
+
+### 会话怎么分
+
+- **私聊**：跟 GUI 主会话共用同一个 SessionId（`sessionId`，默认 `session-discord-main`）——你在 GUI 里聊过的，私聊里它也记得。
+- **服务器**：每个服务器（guild）一个独立会话，默认 id 是 `session-discord-guild-<服务器id>`（`guildSessionPrefix` 可改，也可以用 `guildSessions` 明确指定）。不同服务器之间、服务器和私聊之间，记忆不串。
+- `/new` 只作废**你当前所在的那个会话**；`/status` 会显示当前用的是哪一套。
+- 好处：群里的话题不会污染私聊；一个群玩嗨了，另一个群还是干净的。
+
+### 群聊先读几条历史
+
+群里有人叫它时，它会把频道里最近的几条消息一起读进上下文（默认 **10 条**），
+这样你回第 3 句时它不会只顾着回最新一句。条数在 **设置 → Discord → 余额预算**
+面板里改（`guildHistoryLimit`，0 = 不读，最大 100）。**只对服务器生效**，私聊不读历史。
+
+### 暗号
+
+看到这两串 emoji 时，它不经过模型、直接回一句（不花 token、不排队）：
+
+| 你发 | 它回 |
+|---|---|
+| `:raised_hand::rage::raised_back_of_hand:`（🖐️😡🤚） | `token回！:raised_hand::rage::raised_back_of_hand:` |
+| `:raised_hand::smiling_imp::raised_back_of_hand:`（🖐️😈🤚） | `token回！:wave: :smiling_imp::wave:` |
+
+短码和真 emoji 都认；`emojiReplies` 可以自己改或加别的暗号。
 
 ### 怎么称呼对面
 
@@ -64,6 +91,7 @@
 - 余额来源：DSH 账号服务 `deepseekAccount.getBalance()`（充值钱包 + 赠金一起算，只登录客户端也读得到）；
   读不到时退回 `dsh-whale-widget` 的账本 `<DSH_HOME>/.dshw-usage.json` 的 `lastBalance`（30 分钟内的才信）。
 - 两条路都失败 → **fail-open**：照常聊天，面板上标红写「余额读不到」。宁可漏停，也不因为一次网络抽风把主人关在门外。
+- **只管别人**：主人自己聊天默认不卡额度（私聊、群聊都不卡），只有服务器里的其他人回复时才可能被余额线/额度拦住；开关 `budget.skipOwners`（默认 `true`，面板里有勾选框）。
 - 阈值优先级：服务器专属 > 私聊专属 > 全局。
 - 语义：**留空 = 跟着全局走**；**填 `0` = 这条线自己不限**（想让私聊豁免全局线，就把私聊线填 0）。
 - 面板：**设置 → Discord → 余额预算**，能看当前余额、每个作用域已花多少、填线/额度/清零，都是即时生效 + 落盘。
@@ -150,7 +178,12 @@ token 和 user ID **不进源码**，写在 `<DSH_HOME>/discord-bridge.json`（�
 | `triggerWords` | 见上 | 主人没 @ 它时，话里含这些词就主动插一句 |
 | `grants` | `{}` | 已批准的外部用户（GUI 里点出来的，插件自己维护，别手改） |
 | `botPolicy` | `{}` | 已批准/记录过的机器人：`{ accept, chat }`（GUI 里点出来的，别手改） |
-| `budget` | 见上文 | 余额预算：`{ enabled, global, dm, globalQuota, dmQuota, guilds }` |
+| `budget` | 见上文 | 余额预算：`{ enabled, global, dm, globalQuota, dmQuota, guilds, skipOwners }` |
+| `budget.skipOwners` | `true` | 主人自己聊天不计额度（余额线/额度都跳过，只管服务器里的其他人） |
+| `guildSessionPrefix` | `session-discord-guild-` | 服务器会话 id 前缀（每个服务器一套独立会话） |
+| `guildSessions` | `{}` | 服务器 id → 会话 id 的显式映射（插件自动补，一般不用手改） |
+| `guildHistoryLimit` | `10` | 群聊先读几条最近消息（0 = 不读，最大 100；只服务器生效） |
+| `emojiReplies` | 见上文 | 暗号表：`{ "你发的": "它回的" }`，短码或真 emoji 都认 |
 | `spend` | `{}` | 花费账本：`{ "<scope>": { spent, updatedAt, since } }`，由插件自己攒 |
 | `guildNames` | `{}` | 见过的服务器 id → 名字（面板显示用，插件自动补） |
 | `consentTimeoutMs` | `600000` | 陌生人的确认卡片等多久（超时作废，再来就再问） |
@@ -174,6 +207,7 @@ token 和 user ID **不进源码**，写在 `<DSH_HOME>/discord-bridge.json`（�
 - 审批/提问不会飘到 Discord（走 GUI。**例外**：陌生人的准入确认走 GUI 的「Discord 准入」页）
 - 一个 bot 一个主人，不做多用户隔离；批准的人跟主人共用同一个会话上下文（权限上仍然分得清）
 - 群里别人未获批时，它不会把他们的内容转给 agent
+- 群聊历史只读「最近 N 条」，更早的翻不到；要它回特别老的消息时，把它回复/引用一下最稳
 
 ## 排障
 

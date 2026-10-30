@@ -286,6 +286,12 @@ export function createBudgetDesk({ cfg, ctx, log }) {
     const spent = spendOf(scope)
     const base = { ...line, quota: quota.quota, quotaFrom: quota.from, spent, currency: line.currency }
 
+    // 主人自己聊天不计额度：额度只管服务器里的其他人。
+    // 还是会记账（面板上看得到），只是不用这条来卡主人。
+    if (budget().skipOwners !== false && scope && scope.isOwner) {
+      return { paused: false, reason: null, ...base, total: cache?.ok ? cache.total : null }
+    }
+
     if (!budget().enabled) {
       return { paused: false, reason: null, ...base, total: cache?.ok ? cache.total : null }
     }
