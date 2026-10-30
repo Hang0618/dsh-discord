@@ -1,6 +1,6 @@
 {
   "name": "dsh-discord",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "private": true,
   "description": "把 DSH 接到 Discord：零依赖 Cordis 插件，流式回复、固定会话、陌生人准入、余额预算",
   "type": "module",

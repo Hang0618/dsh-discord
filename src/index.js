@@ -32,7 +32,7 @@ export const name = 'dsh-discord'
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets']
 
 /** 日志里带版本号，方便确认热重载到底有没有换成新代码 */
-const VERSION = '0.5.3'
+const VERSION = '0.5.4'
 
 const HELP_TEXT = [
   '**我在呢。** 直接说话就行，别的都不用管。',
@@ -967,7 +967,7 @@ export function apply(ctx, config = {}) {
     }
   }
 
-  /** 群聊里把「本轮花了多少 token」补到刚发出的那条消息末尾。 */
+  /** 群聊里把「本轮花了多少 token · 多少钱 · 设置的额度还剩多少」补到刚发出的那条消息末尾。 */
   async function appendTurnFooter() {
     const last = state.lastTurn
     if (!last) return
@@ -979,7 +979,13 @@ export function apply(ctx, config = {}) {
     const tokens =
       (Number(usage.input) || 0) + (Number(usage.cache) || 0) + (Number(usage.output) || 0)
     if (tokens <= 0) return
-    await writer.appendFooter(`-# 本轮 ${tokens.toLocaleString()} tokens`)
+    const cost = Number(last.cost) || 0
+    // 这一轮已经结算进 spend 了（turn/end 里先 addSpend 再走到这里），所以剩余是扣完本轮之后的数
+    const quota = budgetDesk.quotaOf(scope).quota
+    const remaining = quota > 0 ? Math.max(0, quota - budgetDesk.spendOf(scope)) : null
+    const quotaPart = remaining === null ? '额度不限' : `可使用设置额度还剩${remaining.toFixed(2)}`
+    const footer = `-# 本轮 ${tokens.toLocaleString()} tokens · ¥${cost.toFixed(4)} · ${quotaPart}`
+    await writer.appendFooter(footer)
   }
 
   async function deliver(job) {

@@ -123,5 +123,15 @@ function trimHistory(text, limit) {
 }
 ok('历史条数上限生效', trimHistory('a\nb\nc\nd\ne', 3).length === 3)
 
+// 5. footer 里的「可使用设置额度还剩多少」（同 index.js appendTurnFooter 的算法）
+const deskFooter = deskWithQuota(0.5)
+const scopeFooter = { isOwner: false, isDM: false, guildId: '100' }
+const remainFooter = Math.max(
+  0,
+  deskFooter.quotaOf(scopeFooter).quota - deskFooter.spendOf(scopeFooter),
+)
+ok('额度剩余 = 额度 - 已花（花完剩 0）', remainFooter === 0, String(remainFooter))
+ok('额度上限读得到', deskFooter.quotaOf(scopeFooter).quota === 0.5, String(deskFooter.quotaOf(scopeFooter).quota))
+
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed === 0 ? 0 : 1)
