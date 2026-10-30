@@ -110,6 +110,20 @@ function readConfigFile(path, log) {
 }
 
 /**
+ * 正文里有没有叫到配置的名字（不区分大小写）。
+ * 用来判断「@ 之外的叫法」：主人/群友/别的机器人，在正文里提到 triggerWords 也算叫了它。
+ * triggerWords 为空时永远返回 false。
+ */
+export function mentionsTriggerWord(content, words) {
+  const text = String(content ?? '').toLowerCase()
+  if (!text) return false
+  return (Array.isArray(words) ? words : []).some((word) => {
+    const needle = String(word ?? '').trim().toLowerCase()
+    return needle.length > 0 && text.includes(needle)
+  })
+}
+
+/**
  * 合并出最终配置。
  * @param {object} raw - cordis patch 传进来的 config
  * @param {(msg:string)=>void} log

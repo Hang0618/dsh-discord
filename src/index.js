@@ -17,6 +17,7 @@ import {
   INTENTS,
   DEFAULT_CONFIG_PATH,
   EMOJI_SHORTCODES,
+  mentionsTriggerWord,
 } from './config.js'
 import { DiscordRest } from './rest.js'
 import { DiscordGateway } from './gateway.js'
@@ -32,7 +33,7 @@ export const name = 'dsh-discord'
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets']
 
 /** 日志里带版本号，方便确认热重载到底有没有换成新代码 */
-const VERSION = '0.5.6'
+const VERSION = '0.6.0'
 
 const HELP_TEXT = [
   '**我在呢。** 直接说话就行，别的都不用管。',
@@ -1136,11 +1137,16 @@ export function apply(ctx, config = {}) {
         log(`忽略：主人只让收着机器人的话，不接话（${policy.name}）`)
         return
       }
-      // 别的机器人：只有明确对着我说话（@我 / 引用我）才接。
-      // 它们互相聊天、或者点名别人时我不凑热闹——否则三个 bot 会开茶话会。
-      if (!botMentioned && !repliesToBot) {
+      // 别的机器人：明确对着我说话（@我 / 引用我）才接；
+      // 或者在正文里叫到 triggerWords（「小肥鱼」「鲸鱼娘」这类名字）也算点名。
+      // 它们互相聊天、或者叫的是别人时我不凑热闹——否则三个 bot 会开茶话会。
+      const botNamed = mentionsTriggerWord(cleanContent(data.content), cfg.triggerWords)
+      if (!botMentioned && !repliesToBot && !botNamed) {
         log(`忽略：机器人 ${policy.name} 没点名我，不凑热闹（${senderId}）`)
         return
+      }
+      if (!botMentioned && !repliesToBot && botNamed) {
+        log(`机器人 ${policy.name} 叫到关键词，接话（${senderId}）`)
       }
       const streak = state.botStreak.get(senderId) || { count: 0, since: Date.now() }
       if (Date.now() - streak.since > 5 * 60_000) {
@@ -1178,9 +1184,7 @@ export function apply(ctx, config = {}) {
       const named =
         Boolean(grant) &&
         grant.requireMention === false &&
-        cfg.triggerWords.some(
-          (word) => word && cleanContent(data.content).toLowerCase().includes(word.toLowerCase()),
-        )
+        mentionsTriggerWord(cleanContent(data.content), cfg.triggerWords)
       const canChat = Boolean(grant) && (addressed || named)
       if (!canChat) {
         if (!addressed) {
@@ -1218,9 +1222,7 @@ export function apply(ctx, config = {}) {
     // 主人的群聊：没 @ 我、没引用我、也没提到关键词，就安静待着
     if (!isDM && isOwner && !botMentioned && !repliesToBot && !ownerHandsOver) {
       const content = cleanContent(data.content)
-      const hit = cfg.triggerWords.some(
-        (word) => word && content.toLowerCase().includes(word.toLowerCase()),
-      )
+      const hit = mentionsTriggerWord(content, cfg.triggerWords)
       if (!hit) {
         log('群里没提到我，不插话')
         return

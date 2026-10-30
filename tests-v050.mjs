@@ -1,6 +1,6 @@
 // 0.5.0 新功能的离线测试：配置默认值、暗号匹配、额度只管别人、历史条数解析。
 // 直接跑：node tests-v050.mjs
-import { resolveConfig, resolveBudget, DEFAULT_CONFIG_PATH } from './src/config.js'
+import { resolveConfig, resolveBudget, DEFAULT_CONFIG_PATH, mentionsTriggerWord } from './src/config.js'
 import { createBudgetDesk } from './src/budget.js'
 import { isSilentReply } from './src/outbound.js'
 
@@ -103,6 +103,12 @@ ok('整条 [SILENT] → 不发', isSilentReply('[SILENT]') === true)
 ok('[SILENT] 带标点/空白 → 不发', isSilentReply('  [SILENT]。 ') === true)
 ok('正常文字 → 照发', isSilentReply('好的，我在。') === false)
 ok('文字里夹 [SILENT] → 照发', isSilentReply('这题我会 [SILENT] 然后继续') === false)
+
+// 2.6 正文里叫到 triggerWords（@ 之外的叫法，机器人/群友/主人都用这一套）
+ok('正文叫「小肥鱼」也算点名', mentionsTriggerWord('诶——小肥鱼是吧', ['小肥鱼']) === true)
+ok('关键词不区分大小写', mentionsTriggerWord('HELLO 鲸鱼娘', ['鲸鱼娘']) === true)
+ok('没叫到 → false', mentionsTriggerWord('今天吃什么', ['小肥鱼', '鲸鱼娘']) === false)
+ok('空词表 → false', mentionsTriggerWord('小肥鱼', []) === false)
 
 // 3. 额度只管服务器里的其他人
 function deskWithQuota(quota) {
