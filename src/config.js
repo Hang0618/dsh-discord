@@ -63,7 +63,7 @@ export const DEFAULT_EMOJI_REPLIES = {
 
 /** 默认的「说完这句就不用回」的告别语：催问遇到它们就收手。 */
 export const DEFAULT_FAREWELL_WORDS = [
-  '晚安', '晚安啦', '晚安咯', '早点睡', '睡了', '先睡', '再见', '拜拜', '拜～', '回头见',
+  '晚安', '晚安啦', '晚安咯', '早点睡', '睡了', '睡吧', '先睡', '再见', '拜拜', '拜～', '回头见',
   '下次见', '下次聊', '先这样', '就这样', '先撤', '告辞', '明天见', '明儿见', '明天聊', '明儿聊',
   '明早见', '明儿再说', '改天再聊', '回见', '回头聊', '有空再聊', '不聊啦', '撤了', '闪了',
   '先忙', '去忙', '先下了', '下线了', '歇了',
@@ -77,13 +77,15 @@ export function isFarewellText(text, words = DEFAULT_FAREWELL_WORDS) {
   if (!plain) return false
   // 问句结尾不算告别（「明天见吗？」「晚安？」是还在等回话）
   if (/[？?]\s*$/.test(plain)) return false
-  // 看最后两句：告别语可能在倒数第二句（「晚安啦。灯给你留一盏，明儿见。」）
-  const sentences = plain
-    .split(/[。！？!?…~～\n]/)
+  // 按标点和逗号切成短语，看最后 3 个短语：告别语可能只占句中的一个短语
+  // 「好啦好啦，晚安，睡吧。」「哼……晚安啦，那句本鱼收下了。」
+  const phrases = plain
+    .split(/[。！？!?…~～\n，,、；;：:]/)
     .map((part) => part.trim())
     .filter(Boolean)
-  return sentences.slice(-2).some((sentence) => {
-    const tail = sentence
+  return phrases.slice(-3).some((phrase) => {
+    const tail = phrase
+      .replace(/^[\s。！？!?…~～、，,.]+/g, '')
       .replace(/[\s。！？!?…~～、，,.]+$/g, '')
       .replace(/[吧啦咯呀哦嘛哟哈呢]+$/g, '')
     if (!tail) return false

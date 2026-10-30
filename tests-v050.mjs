@@ -99,6 +99,8 @@ ok('晚安收尾 → 不催', isFarewellText('好呀，那晚安啦～') === tru
 ok('再见收尾 → 不催', isFarewellText('那就这样，再见！') === true)
 ok('拜拜收尾 → 不催', isFarewellText('你先忙，拜拜') === true)
 ok('两句里的告别语 → 也认', isFarewellText('晚安啦。灯给你留一盏，明儿见。') === true)
+ok('告别语在句中逗号后 → 也认', isFarewellText('哼，突然这么肉麻。晚安啦，那句本鱼收下了。') === true)
+ok('晚安只是句中的一个短语 → 也认', isFarewellText('好啦好啦，晚安，睡吧。') === true)
 ok('明儿见 → 不催', isFarewellText('那我先溜了，明儿见') === true)
 ok('先这样吧（带语气词）→ 不催', isFarewellText('好，先这样吧') === true)
 ok('问句结尾 → 照催', isFarewellText('我们明天见吗？') === false)
