@@ -47,16 +47,26 @@ function normalizeEmoji(text) {
     .replace(/[\uFE0F\u200D]/g, '')
     .replace(/\u{1F590}/gu, '\u270B')
 }
+function countOccurrences(haystack, needle) {
+  if (!needle) return 0
+  let count = 0
+  let index = haystack.indexOf(needle)
+  while (index !== -1) {
+    count += 1
+    index = haystack.indexOf(needle, index + needle.length)
+  }
+  return count
+}
 function matchEmojiReply(content, replies) {
-  const plain = normalizeEmoji(content)
+  const plain = normalizeEmoji(emojiShortcodeToUnicode(content))
+  const pieces = []
   for (const [trigger, reply] of Object.entries(replies || {})) {
     if (!trigger) continue
-    const variants = [trigger, emojiShortcodeToUnicode(trigger)]
-    if (variants.some((variant) => variant && plain.includes(normalizeEmoji(variant)))) {
-      return emojiShortcodeToUnicode(reply)
-    }
+    const needle = normalizeEmoji(emojiShortcodeToUnicode(trigger))
+    const count = countOccurrences(plain, needle)
+    if (count > 0) pieces.push(Array(count).fill(emojiShortcodeToUnicode(reply)).join('\n'))
   }
-  return null
+  return pieces.length ? pieces.join('\n') : null
 }
 const replies = cfg.emojiReplies
 ok(
@@ -79,6 +89,11 @@ ok('✋ 版第二组暗号命中', matchEmojiReply('token来✋😈🤚', replie
   String(matchEmojiReply('token来✋😈🤚', replies)))
 ok('🖐️ 版也命中（两种画法归一）', matchEmojiReply('token来🖐️😈🤚', replies) === 'token回！👋 😈👋',
   String(matchEmojiReply('token来🖐️😈🤚', replies)))
+ok(
+  '发两遍回两遍（每遍一行）',
+  matchEmojiReply('token来✋😈🤚token来✋😈🤚', replies) === 'token回！👋 😈👋\ntoken回！👋 😈👋',
+  JSON.stringify(matchEmojiReply('token来✋😈🤚token来✋😈🤚', replies)),
+)
 ok('普通消息不命中', matchEmojiReply('今天吃什么', replies) === null)
 ok('单表情不误伤', matchEmojiReply('🖐️', replies) === null)
 

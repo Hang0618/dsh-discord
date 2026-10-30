@@ -41,12 +41,16 @@ export class StreamWriter {
     this.producedAnyText = false
     // flush 串行用的 promise 链（见 flush()）
     this.chain = Promise.resolve()
+    // 最后一条真正落地的消息（群聊收尾时用来补「本轮 token / 余额」）
+    this.lastSent = null
   }
 
   /** 新的用户消息进来时设定回复目标（频道 + 可选引用）。 */
   setTarget(channelId, replyTo = null) {
     this.channelId = channelId
     this.replyTo = replyTo
+    // 新一轮消息：上一轮最后那条消息的引用作废，避免把「本轮信息」追加到旧消息上
+    this.lastSent = null
   }
 
   beginTurn(turn) {
@@ -165,6 +169,7 @@ export class StreamWriter {
         if (!existing) break
       }
     }
+    if (group.sent.length) this.lastSent = group.sent[group.sent.length - 1]
     this.lastFlushAt = Date.now()
     if (force) {
       // 收尾时打一条：能看出「模型出了多少字」和「Discord 上最终是多少段」
@@ -173,6 +178,29 @@ export class StreamWriter {
     if (this.stream && force && group === this.group && text !== group.text) {
       // 期间又来了新内容（极少见），再排一次
       this.schedule(this.editIntervalMs)
+    }
+  }
+
+  /**
+   * 在「本轮最后一条已落地的消息」末尾补一行小字（群聊的 token / 余额）。
+   *
+   * 只编辑，不发送新消息：满屏统计比一句「本轮 800 tokens」更吵。
+   * 超过单条允许长度就放弃 —— 宁可少一行小字，也不要把消息截断。
+   */
+  async appendFooter(footer) {
+    const text = String(footer || '').trim()
+    const last = this.lastSent
+    if (!text || !last) return
+    const next = `${last.content}\n\n${text}`
+    if (next.length > this.chunkLimit) {
+      this.log(`[footer] 追加后 ${next.length} 字超过单条上限，跳过`)
+      return
+    }
+    try {
+      await this.rest.editMessage(this.channelId, last.id, next)
+      last.content = next
+    } catch (error) {
+      this.log(`[footer] 追加上轮信息失败：${error?.message || error}`)
     }
   }
 
@@ -201,5 +229,6 @@ export class StreamWriter {
     this.group = null
     this.producedAnyText = false
     this.chain = Promise.resolve()
+    this.lastSent = null
   }
 }

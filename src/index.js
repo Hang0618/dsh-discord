@@ -32,7 +32,7 @@ export const name = 'dsh-discord'
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets']
 
 /** 日志里带版本号，方便确认热重载到底有没有换成新代码 */
-const VERSION = '0.5.1'
+const VERSION = '0.5.2'
 
 const HELP_TEXT = [
   '**我在呢。** 直接说话就行，别的都不用管。',
@@ -312,6 +312,10 @@ export function apply(ctx, config = {}) {
     lastPause: null,
     // 这一轮花了多少（累加 assistant/message 的 usage，turn/end 时结算）
     turnCost: 0,
+    // 这一轮的 usage 明细（群聊回复末尾展示 token 数用）
+    turnUsage: null,
+    // 刚结算完、还没补到 Discord 消息上的那一轮信息
+    lastTurn: null,
     // 这一轮的花费算在谁头上：{ isDM, guildId }
     chargeScope: null,
     typingTimer: null,
@@ -334,12 +338,22 @@ export function apply(ctx, config = {}) {
             const model = event.data?.message?.source?.model || ''
             const { cost } = costOf(usage, model)
             if (cost > 0) state.turnCost += cost
+            // tokens 明细另存一份：群聊回复末尾要展示「本轮多少 token」
+            if (state.turnUsage) {
+              state.turnUsage.input += Number(usage.inputTokens) || 0
+              state.turnUsage.cache += Number(usage.cacheReadTokens) || 0
+              state.turnUsage.output += Number(usage.outputTokens) || 0
+            }
             return
           }
           if (type !== 'turn/end') return
           const cost = state.turnCost
           state.turnCost = 0
           const scope = state.chargeScope
+          if (state.turnUsage) {
+            state.lastTurn = { usage: state.turnUsage, cost, scope }
+            state.turnUsage = null
+          }
           if (cost <= 0 || !scope) return
           const spent = budgetDesk.addSpend(scope, cost)
           persistAccess()
@@ -678,7 +692,13 @@ export function apply(ctx, config = {}) {
     log(`agent 状态：${status}`)
     if (status === 'idle') {
       stopTyping()
-      void writer.endTurn().catch(() => {})
+      void (async () => {
+        try {
+          await writer.endTurn()
+        } catch {}
+        // 群聊：回复落地后补一行「本轮 token / 余额」
+        await appendTurnFooter()
+      })()
     } else if (status === 'running') {
       if (state.channelId) startTyping(state.channelId)
     }
@@ -778,17 +798,34 @@ export function apply(ctx, config = {}) {
       .replace(/\u{1F590}/gu, '\u270B')
   }
 
-  /** 消息里有没有哪条暗号；有就返回要回的那句（已转成 Unicode），没有返回 null。 */
+  /** 数 needle 在 haystack 里出现几次（不重叠）。 */
+  function countOccurrences(haystack, needle) {
+    if (!needle) return 0
+    let count = 0
+    let index = haystack.indexOf(needle)
+    while (index !== -1) {
+      count += 1
+      index = haystack.indexOf(needle, index + needle.length)
+    }
+    return count
+  }
+
+  /**
+   * 消息里有没有哪条暗号；有就返回要回的那句（已转成 Unicode），没有返回 null。
+   * 发了 N 遍就回 N 遍（每遍一行）—— 主人特意要「发几遍回几遍」。
+   */
   function matchEmojiReply(content) {
-    const plain = normalizeEmoji(content)
+    const plain = normalizeEmoji(emojiShortcodeToUnicode(content))
+    const pieces = []
     for (const [trigger, reply] of Object.entries(cfg.emojiReplies || {})) {
       if (!trigger) continue
-      const variants = [trigger, emojiShortcodeToUnicode(trigger)]
-      if (variants.some((variant) => variant && plain.includes(normalizeEmoji(variant)))) {
-        return emojiShortcodeToUnicode(reply)
+      const needle = normalizeEmoji(emojiShortcodeToUnicode(trigger))
+      const count = countOccurrences(plain, needle)
+      if (count > 0) {
+        pieces.push(Array(count).fill(emojiShortcodeToUnicode(reply)).join('\n'))
       }
     }
-    return null
+    return pieces.length ? pieces.join('\n') : null
   }
 
   // ---------- 群聊历史 ----------
@@ -930,6 +967,29 @@ export function apply(ctx, config = {}) {
     }
   }
 
+  /** 群聊里把「本轮花了多少 token、还剩多少余额」补到刚发出的那条消息末尾。 */
+  async function appendTurnFooter() {
+    const last = state.lastTurn
+    if (!last) return
+    state.lastTurn = null
+    const scope = last.scope
+    // 私聊不展示：那是主人自己看自己，吵
+    if (!scope || scope.isDM) return
+    const usage = last.usage || {}
+    const tokens =
+      (Number(usage.input) || 0) + (Number(usage.cache) || 0) + (Number(usage.output) || 0)
+    if (tokens <= 0) return
+    const cost = Number(last.cost) || 0
+    let money = '余额读不到'
+    try {
+      const bal = await budgetDesk.balance(false)
+      if (bal?.ok) money = `余额 ¥${bal.total}`
+    } catch {}
+    const costPart = cost > 0 ? ` · ¥${cost.toFixed(4)}` : ''
+    const footer = `-# 本轮 ${tokens.toLocaleString()} tokens${costPart} · ${money}`
+    await writer.appendFooter(footer)
+  }
+
   async function deliver(job) {
     const { content, channelId, isDM, speaker, replyToId } = job
     state.speaker = speaker
@@ -937,6 +997,8 @@ export function apply(ctx, config = {}) {
     // 这一轮的花费记到谁头上（私聊 / 某个服务器）
     state.chargeScope = { isDM, guildId: speaker?.guildId ?? null }
     state.turnCost = 0
+    state.turnUsage = { input: 0, cache: 0, output: 0 }
+    state.lastTurn = null
     const sessionId = sessionIdFor({ isDM, guildId: speaker?.guildId ?? null })
     state.activeSessionId = sessionId
     writer.setTarget(channelId, cfg.replyToUser ? replyToId : null)
