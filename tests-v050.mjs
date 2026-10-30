@@ -31,7 +31,7 @@ ok('群聊会话可显式指定', cfgCustom.guildSessions['1'] === 's1')
 
 // 2. 暗号匹配（跟 index.js 里同逻辑）
 const EMOJI_SHORTCODES = {
-  raised_hand: '🖐️',
+  raised_hand: '✋',
   rage: '😡',
   raised_back_of_hand: '🤚',
   smiling_imp: '😈',
@@ -43,7 +43,9 @@ function emojiShortcodeToUnicode(text) {
   )
 }
 function normalizeEmoji(text) {
-  return String(text).replace(/[\uFE0F\u200D]/g, '')
+  return String(text)
+    .replace(/[\uFE0F\u200D]/g, '')
+    .replace(/\u{1F590}/gu, '\u270B')
 }
 function matchEmojiReply(content, replies) {
   const plain = normalizeEmoji(content)
@@ -60,12 +62,12 @@ const replies = cfg.emojiReplies
 ok(
   '短码暗号命中',
   matchEmojiReply('token来:raised_hand::rage::raised_back_of_hand:', replies) ===
-    'token回！🖐️😡🤚',
+    'token回！✋😡🤚',
   String(matchEmojiReply('token来:raised_hand::rage::raised_back_of_hand:', replies)),
 )
 ok(
   'Unicode 暗号命中',
-  matchEmojiReply('token来🖐️😡🤚', replies) === 'token回！🖐️😡🤚',
+  matchEmojiReply('token来🖐️😡🤚', replies) === 'token回！✋😡🤚',
   String(matchEmojiReply('token来🖐️😡🤚', replies)),
 )
 ok(
@@ -73,6 +75,10 @@ ok(
   matchEmojiReply('token来🖐️😈🤚', replies) === 'token回！👋 😈👋',
   String(matchEmojiReply('token来🖐️😈🤚', replies)),
 )
+ok('✋ 版第二组暗号命中', matchEmojiReply('token来✋😈🤚', replies) === 'token回！👋 😈👋',
+  String(matchEmojiReply('token来✋😈🤚', replies)))
+ok('🖐️ 版也命中（两种画法归一）', matchEmojiReply('token来🖐️😈🤚', replies) === 'token回！👋 😈👋',
+  String(matchEmojiReply('token来🖐️😈🤚', replies)))
 ok('普通消息不命中', matchEmojiReply('今天吃什么', replies) === null)
 ok('单表情不误伤', matchEmojiReply('🖐️', replies) === null)
 

@@ -32,7 +32,7 @@ export const name = 'dsh-discord'
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets']
 
 /** 日志里带版本号，方便确认热重载到底有没有换成新代码 */
-const VERSION = '0.5.0'
+const VERSION = '0.5.1'
 
 const HELP_TEXT = [
   '**我在呢。** 直接说话就行，别的都不用管。',
@@ -771,7 +771,11 @@ export function apply(ctx, config = {}) {
   }
 
   function normalizeEmoji(text) {
-    return String(text).replace(/[\uFE0F\u200D]/g, '')
+    // ✋(U+270B) 和 🖐️(U+1F590) 在 Discord 上是同一个「抬起手掌」的两种画法：
+    // :raised_hand: 客户端渲染成 ✋，但从别处复制来的常是 🖐️ —— 统一归一到 ✋ 再比对。
+    return String(text)
+      .replace(/[\uFE0F\u200D]/g, '')
+      .replace(/\u{1F590}/gu, '\u270B')
   }
 
   /** 消息里有没有哪条暗号；有就返回要回的那句（已转成 Unicode），没有返回 null。 */

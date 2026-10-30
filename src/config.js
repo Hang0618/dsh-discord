@@ -46,7 +46,9 @@ function asMoneyOrInherit(value) {
 // 暗号：常见表情的 :shortcode: → Unicode。聊天里发出来的是 Unicode，
 // 配置里写短码更顺手，所以两边的写法都认。
 export const EMOJI_SHORTCODES = {
-  raised_hand: '🖐️',
+  // Discord 的 :raised_hand: 客户端渲染成 ✋(U+270B)；🖐️(U+1F590) 是它的另一种画法，
+  // 匹配时在 normalizeEmoji 里统一归一到 ✋，两种手掌都认。
+  raised_hand: '✋',
   rage: '😡',
   raised_back_of_hand: '🤚',
   smiling_imp: '😈',

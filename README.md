@@ -59,10 +59,10 @@
 
 | 你发 | 它回 |
 |---|---|
-| `:raised_hand::rage::raised_back_of_hand:`（🖐️😡🤚） | `token回！:raised_hand::rage::raised_back_of_hand:` |
-| `:raised_hand::smiling_imp::raised_back_of_hand:`（🖐️😈🤚） | `token回！:wave: :smiling_imp::wave:` |
+| `:raised_hand::rage::raised_back_of_hand:`（✋😡🤚） | `token回！:raised_hand::rage::raised_back_of_hand:` |
+| `:raised_hand::smiling_imp::raised_back_of_hand:`（✋😈🤚） | `token回！:wave: :smiling_imp::wave:` |
 
-短码和真 emoji 都认；`emojiReplies` 可以自己改或加别的暗号。
+短码和真 emoji 都认，`✋` 和 `🖐️` 两种手掌画法都算（Discord 客户端渲染的是 `✋`）；`emojiReplies` 可以自己改或加别的暗号。
 
 ### 怎么称呼对面
 
