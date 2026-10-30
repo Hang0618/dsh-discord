@@ -25,6 +25,20 @@ export function isSilentReply(text) {
   return SILENT_RE.test(String(text ?? ''))
 }
 
+// Discord 里真人发消息是「一条连着写」的，不会一行一句。模型却习惯用空行分段，
+// 看起来就像客服机器人。这里把普通正文里的换行压掉（代码块、引用、列表、表格例外）。
+const KEEP_LINEBREAK_RE = /```|^>\s|^\s*[-*+]\s|^\s*\d+\.\s|^\|.*\|/m
+
+export function compactForDiscord(text) {
+  const value = String(text ?? '')
+  if (!value || KEEP_LINEBREAK_RE.test(value)) return value
+  return value
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n+/g, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim()
+}
+
 export class StreamWriter {
   /**
    * @param {{rest: any, chunkLimit: number, editIntervalMs: number, log: Function}} options
@@ -147,7 +161,7 @@ export class StreamWriter {
     if (!this.group || !this.channelId) return
     const raw = this.group.text
     // 工具调用协议碎片不是给用户看的：整条都是就丢弃，夹在正文里就剥掉
-    const text = stripInternalMarkers(raw)
+    const text = compactForDiscord(stripInternalMarkers(raw))
     // 模型判断「这条不是跟我说话」，整条只回了 [SILENT]：一个字都不发
     if (isSilentReply(text)) {
       this.log('[silent] 这一轮判断不该插话，没发消息')
@@ -203,7 +217,7 @@ export class StreamWriter {
     const text = String(footer || '').trim()
     const last = this.lastSent
     if (!text || !last) return
-    const next = `${last.content}\n\n${text}`
+    const next = `${last.content}\n${text}`
     if (next.length > this.chunkLimit) {
       this.log(`[footer] 追加后 ${next.length} 字超过单条上限，跳过`)
       return

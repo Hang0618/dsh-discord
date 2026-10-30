@@ -16,8 +16,8 @@ import {
   resolveBudget,
   INTENTS,
   DEFAULT_CONFIG_PATH,
-  EMOJI_SHORTCODES,
   mentionsTriggerWord,
+  matchTokenReply,
 } from './config.js'
 import { DiscordRest } from './rest.js'
 import { DiscordGateway } from './gateway.js'
@@ -33,7 +33,7 @@ export const name = 'dsh-discord'
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets']
 
 /** 日志里带版本号，方便确认热重载到底有没有换成新代码 */
-const VERSION = '0.6.0'
+const VERSION = '0.6.14'
 
 const HELP_TEXT = [
   '**我在呢。** 直接说话就行，别的都不用管。',
@@ -77,8 +77,8 @@ export function apply(ctx, config = {}) {
       raw.spend = cfg.spend
       raw.guildNames = cfg.guildNames
       raw.guildSessions = cfg.guildSessions
-      // 群聊历史条数也要落盘：以前漏了这行，面板里改成 3，重启后又读回默认 10
-      raw.guildHistoryLimit = cfg.guildHistoryLimit
+      // 群聊历史分钟数也要落盘：以前漏了这行，面板里改成 3，重启后又读回默认 10
+      raw.guildHistoryMinutes = cfg.guildHistoryMinutes
       const tmp = `${cfg.configPath}.tmp`
       writeFileSync(tmp, JSON.stringify(raw, null, 2), 'utf8')
       renameSync(tmp, cfg.configPath)
@@ -188,7 +188,7 @@ export function apply(ctx, config = {}) {
                     ok: true,
                     ...budgetDesk.status(),
                     guilds: budgetDesk.guildList(),
-                    guildHistoryLimit: cfg.guildHistoryLimit,
+                    guildHistoryMinutes: cfg.guildHistoryMinutes,
                     notice: state.lastPause,
                   })
                 }
@@ -212,11 +212,11 @@ export function apply(ctx, config = {}) {
                   if (src.guildNames && typeof src.guildNames === 'object') {
                     cfg.guildNames = { ...(cfg.guildNames || {}), ...src.guildNames }
                   }
-                  const historyLimit = body?.guildHistoryLimit ?? src.guildHistoryLimit
-                  if (historyLimit !== undefined) {
-                    cfg.guildHistoryLimit = Math.max(
+                  const historyMinutes = body?.guildHistoryMinutes ?? src.guildHistoryMinutes
+                  if (historyMinutes !== undefined) {
+                    cfg.guildHistoryMinutes = Math.max(
                       0,
-                      Math.min(100, Math.floor(Number(historyLimit) || 0)),
+                      Math.min(1440, Number(historyMinutes) || 0),
                     )
                   }
                   budgetDesk.resetReminders()
@@ -323,6 +323,13 @@ export function apply(ctx, config = {}) {
     chargeScope: null,
     typingTimer: null,
     initPromise: null,
+    // 催问：问完某个人、ta 不回时定时 @ 他（只有群聊用）
+    pingBackPending: null,
+    pingBackTimer: null,
+    // 最近一轮投喂的任务：等本轮真的说了话，才按它启动催问
+    lastJob: null,
+    // 最近一个正在连聊的机器人：3 分钟内它不 @ 也接，免得聊到一半断掉
+    lastBotPartner: null,
     lastError: null,
     startedAt: Date.now(),
   }
@@ -483,8 +490,18 @@ export function apply(ctx, config = {}) {
           '没有提到你、也没有引用你），或者你判断插话没有意义：不要回复，只输出一行 [SILENT]。' +
           '插件看到整条只有 [SILENT] 就不会发任何消息；如果你已经写了别的话，那部分照常发出去。',
       })
+      // 对话接力：别人把话头还回来（「你们继续」）时，接着跟原来的对话对象聊。
+      systemPrompt.context({
+        name: 'discord-relay',
+        order: 20002,
+        interpolate: false,
+        text:
+          '【对话接力】如果别人只是插一句「你们继续」「继续聊」「你们接着聊」之类，把话头还给你，' +
+          '就接着你刚才跟那个对话对象聊的内容继续说下去（可以 @ 对方把话头递过去），别就此断掉；' +
+          '如果刚才的话题确实已经聊完了，那就正常回一句收尾。',
+      })
       agent.__discordSpeakerInjected = true
-      log('说话人称呼与沉默规则已挂上（每轮按当前说话人取 Discord 昵称）')
+      log('说话人称呼、沉默规则与对话接力已挂上（每轮按当前说话人取 Discord 昵称）')
     } catch (error) {
       log(`注入说话人称呼失败：${error?.message || error}`)
     }
@@ -712,6 +729,8 @@ export function apply(ctx, config = {}) {
         } catch {}
         // 群聊：回复落地后补一行「本轮 token / 余额」
         await appendTurnFooter()
+        // 只有这一轮真的发出去过消息，才催对方；整轮 [SILENT] 没说话就别去 @ 人
+        if (writer.lastSent) armPingBack(state.lastJob)
       })()
     } else if (status === 'running') {
       if (state.channelId) startTyping(state.channelId)
@@ -796,63 +815,21 @@ export function apply(ctx, config = {}) {
     return `[回复 / 引用了 ${name} 的消息：「${clipped || '（没有文字，可能只是图片或附件）'}」]`
   }
 
-  // ---------- 表情暗号 ----------
-
-  function emojiShortcodeToUnicode(text) {
-    return String(text).replace(/:([a-z0-9_+-]+):/g, (whole, name) =>
-      EMOJI_SHORTCODES[name] !== undefined ? EMOJI_SHORTCODES[name] : whole,
-    )
-  }
-
-  function normalizeEmoji(text) {
-    // ✋(U+270B) 和 🖐️(U+1F590) 在 Discord 上是同一个「抬起手掌」的两种画法：
-    // :raised_hand: 客户端渲染成 ✋，但从别处复制来的常是 🖐️ —— 统一归一到 ✋ 再比对。
-    return String(text)
-      .replace(/[\uFE0F\u200D]/g, '')
-      .replace(/\u{1F590}/gu, '\u270B')
-  }
-
-  /** 数 needle 在 haystack 里出现几次（不重叠）。 */
-  function countOccurrences(haystack, needle) {
-    if (!needle) return 0
-    let count = 0
-    let index = haystack.indexOf(needle)
-    while (index !== -1) {
-      count += 1
-      index = haystack.indexOf(needle, index + needle.length)
-    }
-    return count
-  }
-
-  /**
-   * 消息里有没有哪条暗号；有就返回要回的那句（已转成 Unicode），没有返回 null。
-   * 发了 N 遍就回 N 遍（连着写，不换行）—— 主人特意要「发几遍回几遍」。
-   */
-  function matchEmojiReply(content) {
-    const plain = normalizeEmoji(emojiShortcodeToUnicode(content))
-    const pieces = []
-    for (const [trigger, reply] of Object.entries(cfg.emojiReplies || {})) {
-      if (!trigger) continue
-      const needle = normalizeEmoji(emojiShortcodeToUnicode(trigger))
-      const count = countOccurrences(plain, needle)
-      if (count > 0) {
-        pieces.push(Array(count).fill(emojiShortcodeToUnicode(reply)).join(''))
-      }
-    }
-    return pieces.length ? pieces.join('') : null
-  }
-
   // ---------- 群聊历史 ----------
 
-  async function fetchGuildHistory(channelId, limit, currentMessageId) {
-    const rows = await rest.request(
-      'GET',
-      `/channels/${channelId}/messages?limit=${Math.max(1, Math.min(100, Math.floor(limit) + 1))}`,
-    )
+  async function fetchGuildHistory(channelId, minutes, currentMessageId) {
+    // 按时间窗口读：先抓最近 100 条（Discord 单次上限），再按「最近 X 分钟」过滤。
+    // 群里热闹时窗口内条数自然多、冷清时条数自然少，不会为了凑条数把很久以前的话也读进来。
+    const rows = await rest.request('GET', `/channels/${channelId}/messages?limit=100`)
     const list = Array.isArray(rows) ? rows : []
+    const cutoff = Date.now() - Math.max(0, Number(minutes) || 0) * 60_000
     return list
       .filter((message) => String(message.id) !== String(currentMessageId))
-      .slice(0, limit)
+      .filter((message) => {
+        const at = Date.parse(message.timestamp)
+        return Number.isFinite(at) && at >= cutoff
+      })
+      .slice(0, 100)
   }
 
   function renderHistoryRow(message) {
@@ -874,7 +851,7 @@ export function apply(ctx, config = {}) {
   async function withGuildHistory(content, channelId, currentMessageId) {
     let rows
     try {
-      rows = await fetchGuildHistory(channelId, cfg.guildHistoryLimit, currentMessageId)
+      rows = await fetchGuildHistory(channelId, cfg.guildHistoryMinutes, currentMessageId)
     } catch (error) {
       log(`读群聊历史失败：${error?.message || error}`)
       return content
@@ -890,7 +867,7 @@ export function apply(ctx, config = {}) {
       lines.push(line)
     }
     lines.reverse()
-    log(`群聊历史：读到 ${rows.length} 条（上限 ${cfg.guildHistoryLimit}），投喂 ${lines.length} 条`)
+    log(`群聊历史：读到 ${rows.length} 条（最近 ${cfg.guildHistoryMinutes} 分钟），投喂 ${lines.length} 条`)
     return (
       `[最近聊天记录（${lines.length} 条，旧→新；当前消息在最后）]\n` +
       `${lines.join('\n')}\n\n[当前消息]\n${content}`
@@ -996,11 +973,98 @@ export function apply(ctx, config = {}) {
     if (tokens <= 0) return
     const cost = Number(last.cost) || 0
     // 这一轮已经结算进 spend 了（turn/end 里先 addSpend 再走到这里），所以剩余是扣完本轮之后的数
+    const budget = budgetDesk.budget()
     const quota = budgetDesk.quotaOf(scope).quota
-    const remaining = quota > 0 ? Math.max(0, quota - budgetDesk.spendOf(scope)) : null
-    const quotaPart = remaining === null ? '额度不限' : `可使用设置额度还剩${remaining.toFixed(2)}`
-    const footer = `-# 本轮 ${tokens.toLocaleString()} tokens · ¥${cost.toFixed(4)} · ${quotaPart}`
+    const line = budgetDesk.thresholdOf(scope).min
+    // 总开关关 → 只报 token 和花费；开了才按「额度 / 余额线」报一句
+    let quotaPart = ''
+    if (budget.enabled) {
+      if (quota > 0) {
+        const remaining = Math.max(0, quota - budgetDesk.spendOf(scope))
+        quotaPart = `可使用设置额度还剩${remaining.toFixed(2)}`
+      } else if (Number(line) > 0) {
+        const bal = await budgetDesk.balance(false).catch(() => null)
+        const now = bal && bal.ok ? Number(bal.total).toFixed(2) : '读不到'
+        quotaPart = `余额线是${Number(line).toFixed(2)} 目前是${now}`
+      }
+    }
+    const footer = quotaPart
+      ? `-# 本轮 ${tokens.toLocaleString()} tokens · ¥${cost.toFixed(4)} · ${quotaPart}`
+      : `-# 本轮 ${tokens.toLocaleString()} tokens · ¥${cost.toFixed(4)}`
     await writer.appendFooter(footer)
+  }
+
+  /**
+   * 「问完你不回」的催问：
+   * 在服务器里回完某人，20 秒没等到 ta 说话就 @ 一次；之后每 30 秒再 @ 一次，最多 3 次。
+   * ta 一说话（哪怕只是冒个泡）就取消；私聊不催。
+   */
+  function clearPingBack(reason) {
+    if (state.pingBackTimer) {
+      clearTimeout(state.pingBackTimer)
+      state.pingBackTimer = null
+    }
+    if (state.pingBackPending) {
+      if (reason) log(`取消催问：${reason}`)
+      state.pingBackPending = null
+    }
+  }
+
+  function armPingBack(job) {
+    clearPingBack()
+    const conf = cfg.pingBack || {}
+    if (conf.enabled === false) return
+    // 私聊不催：对面就是主人，催起来像在讨债
+    if (job.isDM) return
+    const target = job?.speaker
+    if (!target?.id) return
+    if (state.botUserId && String(target.id) === String(state.botUserId)) return
+    const afterMs = Math.max(1000, Number(conf.afterMs) || 20_000)
+    const intervalMs = Math.max(1000, Number(conf.intervalMs) || 30_000)
+    const maxTimes = Math.max(1, Math.min(10, Math.floor(Number(conf.maxTimes) || 3)))
+    const giveUpAfterMs = Math.max(1000, Number(conf.giveUpAfterMs) || 30_000)
+    const giveUpText = String(conf.giveUpText || '好像没人在了，那我先不打扰啦。')
+    const pending = {
+      channelId: job.channelId,
+      userId: String(target.id),
+      name: target.name || '对方',
+      count: 0,
+    }
+    state.pingBackPending = pending
+    const scheduleGiveUp = () => {
+      state.pingBackTimer = setTimeout(async () => {
+        if (state.pingBackPending !== pending) return
+        // 先摘掉 pending，免得收尾期间 ta 回话又去走取消逻辑
+        state.pingBackPending = null
+        state.pingBackTimer = null
+        try {
+          await rest.sendMessage(pending.channelId, giveUpText)
+          await rest.sendMessage(pending.channelId, `<@${pending.userId}>`)
+          log(`催问 ${maxTimes} 次无果，${pending.name} 一直没回，留了一句收尾并最后 @ 了一次`)
+        } catch (error) {
+          log(`收尾消息发送失败：${error?.message || error}`)
+        }
+      }, giveUpAfterMs)
+    }
+    const schedule = (delay) => {
+      state.pingBackTimer = setTimeout(async () => {
+        if (state.pingBackPending !== pending) return
+        pending.count += 1
+        try {
+          await rest.sendMessage(pending.channelId, `<@${pending.userId}> 在吗？`)
+          log(`催问：${pending.name} 还没回，第 ${pending.count}/${maxTimes} 次 @ 了 ta`)
+        } catch (error) {
+          log(`催问发送失败：${error?.message || error}`)
+        }
+        if (state.pingBackPending !== pending) return
+        if (pending.count < maxTimes) schedule(intervalMs)
+        else scheduleGiveUp()
+      }, delay)
+    }
+    schedule(afterMs)
+    log(
+      `开始等 ${pending.name} 回话：${Math.round(afterMs / 1000)} 秒没动静就 @ ta（最多 ${maxTimes} 次）`,
+    )
   }
 
   async function deliver(job) {
@@ -1020,6 +1084,7 @@ export function apply(ctx, config = {}) {
       state.agent = agent
       if (agent.status !== 'running') startTyping(channelId)
       agent.followup(makeUserMessage(content))
+      state.lastJob = job
       log(
         `已投喂 agent（status=${agent.status}，${job.isOwner ? '主人' : '别人'}）：` +
           `「${content.slice(0, 40)}」`,
@@ -1046,6 +1111,10 @@ export function apply(ctx, config = {}) {
     if (isBot && state.botUserId && String(state.botUserId) === senderId) {
       log('忽略：自己发的')
       return
+    }
+    // 刚才催问的人回话了 → 不用再催
+    if (state.pingBackPending && String(state.pingBackPending.userId) === senderId) {
+      clearPingBack('对方回话了')
     }
 
     const channelId = data.channel_id
@@ -1077,9 +1146,10 @@ export function apply(ctx, config = {}) {
     )
     if (repliesToBot) log('这条是引用回复我的消息（不用 @ 也算）')
 
-    // 暗号：发这串表情就回固定的一句话，不调模型（谁发都认，优先于准入/额度）。
+    // 暗号：文字里出现 token来 / token回（感叹号可有可无）才回固定的一句，
+    // 带表情就跟表情、不带就随机三组之一；不调模型（谁发都认，优先于准入/额度）。
     // 只认真人，机器人之间不互相触发，免得两个 bot 拿暗号刷屏。
-    const emojiReply = isBot ? null : matchEmojiReply(rawContent)
+    const emojiReply = isBot ? null : matchTokenReply(rawContent)
     if (emojiReply) {
       await rest
         .sendMessage(channelId, emojiReply, { replyTo: data.id })
@@ -1138,14 +1208,21 @@ export function apply(ctx, config = {}) {
         return
       }
       // 别的机器人：明确对着我说话（@我 / 引用我）才接；
-      // 或者在正文里叫到 triggerWords（「小肥鱼」「鲸鱼娘」这类名字）也算点名。
+      // 或者在正文里叫到 triggerWords（你自己名字表里的叫法）也算点名。
       // 它们互相聊天、或者叫的是别人时我不凑热闹——否则三个 bot 会开茶话会。
       const botNamed = mentionsTriggerWord(cleanContent(data.content), cfg.triggerWords)
-      if (!botMentioned && !repliesToBot && !botNamed) {
+      // 正在跟它连聊（3 分钟内）：它接话时不一定每次都 @/引用，别把话头断在这儿
+      const partnerActive =
+        state.lastBotPartner &&
+        state.lastBotPartner.id === senderId &&
+        Date.now() - state.lastBotPartner.at < 3 * 60_000
+      if (!botMentioned && !repliesToBot && !botNamed && !partnerActive) {
         log(`忽略：机器人 ${policy.name} 没点名我，不凑热闹（${senderId}）`)
         return
       }
-      if (!botMentioned && !repliesToBot && botNamed) {
+      if (partnerActive && !botMentioned && !repliesToBot && !botNamed) {
+        log(`跟机器人 ${policy.name} 还在连聊（3 分钟内），没点名也继续接（${senderId}）`)
+      } else if (!botMentioned && !repliesToBot && botNamed) {
         log(`机器人 ${policy.name} 叫到关键词，接话（${senderId}）`)
       }
       const streak = state.botStreak.get(senderId) || { count: 0, since: Date.now() }
@@ -1153,13 +1230,14 @@ export function apply(ctx, config = {}) {
         streak.count = 0
         streak.since = Date.now()
       }
-      if (streak.count >= 4) {
-        log(`机器人 ${policy.name} 已经连聊 ${streak.count} 轮，先停一停防互刷`)
+      if (streak.count >= cfg.botStreakLimit) {
+        log(`机器人 ${policy.name} 已经连聊 ${streak.count} 轮，先停一停防互刷（上限 ${cfg.botStreakLimit}）`)
         state.botStreak.set(senderId, streak)
         return
       }
       streak.count += 1
       state.botStreak.set(senderId, streak)
+      state.lastBotPartner = { id: senderId, at: Date.now() }
       log(`主人批准过跟机器人 ${policy.name} 聊（本轮第 ${streak.count} 条），继续处理`)
     }
 
@@ -1359,7 +1437,7 @@ export function apply(ctx, config = {}) {
     }
 
     // 群聊：把上面几条聊天记录也带上，不然容易「回复第 3 条、却答成最新那条」
-    if (!isDM && cfg.guildHistoryLimit > 0) {
+    if (!isDM && cfg.guildHistoryMinutes > 0) {
       content = await withGuildHistory(content, channelId, data.id)
     }
 
@@ -1403,6 +1481,7 @@ export function apply(ctx, config = {}) {
 
     return () => {
       log('插件卸载，收工')
+      clearPingBack()
       stopTyping()
       writer.reset()
       offStream?.()
@@ -1426,8 +1505,9 @@ export function apply(ctx, config = {}) {
     `dsh-discord v${VERSION} 已加载：owner=${cfg.ownerIds.join(',') || '（未配置，谁都不理）'} ` +
       `dmOnly=${cfg.dmOnly} 群聊=${cfg.guildChat ? '开' : '关'} ` +
       `已批准=${Object.keys(cfg.grants).length} 人/机器人=${Object.keys(cfg.botPolicy).length} 私聊会话=${cfg.sessionId} ` +
-      `群聊会话=${Object.keys(cfg.guildSessions).length}个/历史${cfg.guildHistoryLimit}条 预设=${cfg.agentPreset || '（无）'} cwd=${cfg.cwd} ` +
+      `群聊会话=${Object.keys(cfg.guildSessions).length}个/历史${cfg.guildHistoryMinutes}分钟 预设=${cfg.agentPreset || '（无）'} cwd=${cfg.cwd} ` +
       `主人不计额度=${cfg.budget.skipOwners !== false ? '开' : '关'} 暗号=${Object.keys(cfg.emojiReplies).length}条` +
+      ` 催问=${cfg.pingBack.enabled ? '开' : '关'}` +
       ` 余额线=${cfg.budget.enabled ? `全局:${cfg.budget.global || '不限'}/私聊:${cfg.budget.dm === null || cfg.budget.dm === undefined ? '跟全局' : cfg.budget.dm || '不限'}/服务器:${Object.keys(cfg.budget.guilds).length}个` : '关'}`,
   )
   // 诊断：列一下这个 profile 里注册了哪些 preset，确认要用的那个真的存在

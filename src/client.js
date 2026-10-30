@@ -406,7 +406,7 @@ window.__ModuleLoader__.load({
           dm: asText(b.dm),
           globalQuota: asText(b.globalQuota),
           dmQuota: asText(b.dmQuota),
-          guildHistoryLimit: asText(next?.guildHistoryLimit ?? 10),
+          guildHistoryMinutes: asText(next?.guildHistoryMinutes ?? 1),
         })
         const rows = Array.isArray(next?.guilds) ? next.guilds : []
         const map = {}
@@ -476,8 +476,8 @@ window.__ModuleLoader__.load({
           const res = await jpost('/budget', {
             enabled: draft.enabled,
             skipOwners: draft.skipOwners !== false,
-            guildHistoryLimit:
-              textOf(draft.guildHistoryLimit) === '' ? 0 : Number(draft.guildHistoryLimit),
+            guildHistoryMinutes:
+              textOf(draft.guildHistoryMinutes) === '' ? 0 : Number(draft.guildHistoryMinutes),
             global: textOf(draft.global) === '' ? 0 : Number(draft.global),
             dm: textOf(draft.dm) === '' ? null : Number(draft.dm),
             globalQuota: textOf(draft.globalQuota) === '' ? null : Number(draft.globalQuota),
@@ -656,12 +656,12 @@ window.__ModuleLoader__.load({
         h(
           'div',
           { style: S.actions },
-          h('span', null, '群聊先读几条历史'),
+          h('span', null, '群聊先读最近几分钟'),
           numInput(
-            draft.guildHistoryLimit,
-            (v) => patchDraft({ guildHistoryLimit: v }),
-            '0 = 不读，默认 10',
-            '1',
+            draft.guildHistoryMinutes,
+            (v) => patchDraft({ guildHistoryMinutes: v }),
+            '0 = 不读，默认 1；0.5 = 30 秒',
+            '0.1',
           ),
           h('span', { style: S.user }, '只对服务器生效；私聊不读历史'),
         ),

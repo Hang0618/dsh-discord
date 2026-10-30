@@ -61,6 +61,71 @@ export const DEFAULT_EMOJI_REPLIES = {
   ':raised_hand::smiling_imp::raised_back_of_hand:': 'token回！:wave: :smiling_imp::wave:',
 }
 
+/** 数 needle 在 haystack 里出现几次（不重叠）。 */
+function countOccurrences(haystack, needle) {
+  if (!needle) return 0
+  let count = 0
+  let index = haystack.indexOf(needle)
+  while (index !== -1) {
+    count += 1
+    index = haystack.indexOf(needle, index + needle.length)
+  }
+  return count
+}
+
+/** :raised_hand: 这类短码 → 真 emoji；不认识的短码原样保留。 */
+export function emojiShortcodeToUnicode(text) {
+  return String(text).replace(/:([a-z0-9_+-]+):/g, (whole, name) =>
+    EMOJI_SHORTCODES[name] !== undefined ? EMOJI_SHORTCODES[name] : whole,
+  )
+}
+
+/** ✋(U+270B) 和 🖐️(U+1F590) 是同一个手势的两种画法，统一归一到 ✋。 */
+export function normalizeEmoji(text) {
+  return String(text)
+    .replace(/[\uFE0F\u200D]/g, '')
+    .replace(/\u{1F590}/gu, '\u270B')
+}
+
+/**
+ * token 暗号：文字方向（token来 / token回，感叹号可有可无）是必须项，
+ * 表情组只用来挑回哪一套——光发表情不算。
+ *   带表情：跟着出现的表情组原样回（token来 ✋😈🤚 → token回！✋😈🤚）
+ *   不带表情：从三组里随机挑一组（token来 → token回！+ 随机一组）
+ *   token回 同理，方向反过来（回 token来！+ 同一组）
+ * 发几遍回几遍（连着写，不换行）；没有方向词返回 null。
+ */
+export const TOKEN_EMOJI_GROUPS = ['✋😈🤚', '✋😡🤚', '👋😈👋']
+
+export function matchTokenReply(content, random = Math.random) {
+  const plain = normalizeEmoji(emojiShortcodeToUnicode(content))
+  // 感叹号不参与判断：token来！/ token来 / token回！ 都算
+  const noBang = plain.replace(/[!！]/g, '')
+  const pieces = []
+  let cursor = 0
+  while (cursor < noBang.length) {
+    const inAt = noBang.indexOf('token来', cursor)
+    const outAt = noBang.indexOf('token回', cursor)
+    if (inAt === -1 && outAt === -1) break
+    const isIn = inAt !== -1 && (outAt === -1 || inAt < outAt)
+    const at = isIn ? inAt : outAt
+    const word = isIn ? 'token来' : 'token回'
+    // 这一遍紧跟着的那段（到下一个方向词为止）里带了哪组表情，就跟着哪组
+    const nextIn = noBang.indexOf('token来', at + word.length)
+    const nextOut = noBang.indexOf('token回', at + word.length)
+    const nextAt = Math.min(
+      ...[nextIn, nextOut].filter((index) => index !== -1),
+      noBang.length,
+    )
+    const rest = noBang.slice(at + word.length, nextAt)
+    const seen = TOKEN_EMOJI_GROUPS.find((group) => rest.includes(group)) || null
+    const group = seen || TOKEN_EMOJI_GROUPS[Math.floor(random() * TOKEN_EMOJI_GROUPS.length)]
+    pieces.push(`${isIn ? 'token回！' : 'token来！'}${group}`)
+    cursor = at + word.length
+  }
+  return pieces.length ? pieces.join('') : null
+}
+
 /**
  * 余额/消费预算配置：
  *   { enabled, global, dm, globalQuota, dmQuota, guilds:{ [guildId]: {name,min,quota} }, refreshMs, remindMs }
@@ -190,13 +255,27 @@ export function resolveConfig(raw = {}, log) {
       merged.guildSessions && typeof merged.guildSessions === 'object' && !Array.isArray(merged.guildSessions)
         ? { ...merged.guildSessions }
         : {},
-    // 群聊里先读最近多少条聊天记录（0 = 不读；只对服务器生效，私聊不读）
-    guildHistoryLimit: Math.max(0, Math.min(100, Math.floor(Number(merged.guildHistoryLimit ?? 10) || 0))),
+    // 群聊里先读最近多少分钟内的聊天记录（0 = 不读；只对服务器生效，私聊不读；支持小数，0.5 = 30 秒）
+    guildHistoryMinutes: Math.max(0, Math.min(1440, Number(merged.guildHistoryMinutes ?? 1) || 0)),
+    // 别的机器人连续说话时，最多接几轮（防两个 bot 互相刷屏；人类一说话计数就归零）
+    botStreakLimit: Math.max(1, Math.min(50, Math.floor(Number(merged.botStreakLimit) || 10))),
     // 暗号：谁发这些表情串，就回一句固定的，不调模型
     emojiReplies:
       merged.emojiReplies && typeof merged.emojiReplies === 'object' && !Array.isArray(merged.emojiReplies)
         ? { ...DEFAULT_EMOJI_REPLIES, ...merged.emojiReplies }
         : { ...DEFAULT_EMOJI_REPLIES },
+    // 催问：回完某人、对方 20 秒不理就 @ 一次，之后每 30 秒一次、最多 3 次；
+    // 3 次都叫不动、再等 30 秒还没回，就留一句「人跑了」的收尾话收工（只对群聊生效）
+    pingBack: {
+      enabled: merged.pingBack?.enabled !== false,
+      afterMs: Math.max(1000, Number(merged.pingBack?.afterMs) || 20_000),
+      intervalMs: Math.max(1000, Number(merged.pingBack?.intervalMs) || 30_000),
+      maxTimes: Math.max(1, Math.min(10, Math.floor(Number(merged.pingBack?.maxTimes) || 3))),
+      giveUpAfterMs: Math.max(1000, Number(merged.pingBack?.giveUpAfterMs) || 30_000),
+      giveUpText: String(
+        merged.pingBack?.giveUpText || '好像没人在了，那我先不打扰啦。',
+      ),
+    },
 
     cwd: String(merged.cwd || process.cwd()),
     // agent preset：决定这个 agent 挂哪一套插件（人设 AGENTS.md、提示词分段、工具集）。
