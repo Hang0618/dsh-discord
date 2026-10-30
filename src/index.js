@@ -32,7 +32,7 @@ export const name = 'dsh-discord'
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets']
 
 /** 日志里带版本号，方便确认热重载到底有没有换成新代码 */
-const VERSION = '0.5.5'
+const VERSION = '0.5.6'
 
 const HELP_TEXT = [
   '**我在呢。** 直接说话就行，别的都不用管。',
@@ -76,6 +76,8 @@ export function apply(ctx, config = {}) {
       raw.spend = cfg.spend
       raw.guildNames = cfg.guildNames
       raw.guildSessions = cfg.guildSessions
+      // 群聊历史条数也要落盘：以前漏了这行，面板里改成 3，重启后又读回默认 10
+      raw.guildHistoryLimit = cfg.guildHistoryLimit
       const tmp = `${cfg.configPath}.tmp`
       writeFileSync(tmp, JSON.stringify(raw, null, 2), 'utf8')
       renameSync(tmp, cfg.configPath)
@@ -887,6 +889,7 @@ export function apply(ctx, config = {}) {
       lines.push(line)
     }
     lines.reverse()
+    log(`群聊历史：读到 ${rows.length} 条（上限 ${cfg.guildHistoryLimit}），投喂 ${lines.length} 条`)
     return (
       `[最近聊天记录（${lines.length} 条，旧→新；当前消息在最后）]\n` +
       `${lines.join('\n')}\n\n[当前消息]\n${content}`
