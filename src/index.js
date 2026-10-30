@@ -32,7 +32,7 @@ export const name = 'dsh-discord'
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets']
 
 /** 日志里带版本号，方便确认热重载到底有没有换成新代码 */
-const VERSION = '0.5.2'
+const VERSION = '0.5.3'
 
 const HELP_TEXT = [
   '**我在呢。** 直接说话就行，别的都不用管。',
@@ -812,7 +812,7 @@ export function apply(ctx, config = {}) {
 
   /**
    * 消息里有没有哪条暗号；有就返回要回的那句（已转成 Unicode），没有返回 null。
-   * 发了 N 遍就回 N 遍（每遍一行）—— 主人特意要「发几遍回几遍」。
+   * 发了 N 遍就回 N 遍（连着写，不换行）—— 主人特意要「发几遍回几遍」。
    */
   function matchEmojiReply(content) {
     const plain = normalizeEmoji(emojiShortcodeToUnicode(content))
@@ -822,10 +822,10 @@ export function apply(ctx, config = {}) {
       const needle = normalizeEmoji(emojiShortcodeToUnicode(trigger))
       const count = countOccurrences(plain, needle)
       if (count > 0) {
-        pieces.push(Array(count).fill(emojiShortcodeToUnicode(reply)).join('\n'))
+        pieces.push(Array(count).fill(emojiShortcodeToUnicode(reply)).join(''))
       }
     }
-    return pieces.length ? pieces.join('\n') : null
+    return pieces.length ? pieces.join('') : null
   }
 
   // ---------- 群聊历史 ----------
@@ -967,7 +967,7 @@ export function apply(ctx, config = {}) {
     }
   }
 
-  /** 群聊里把「本轮花了多少 token、还剩多少余额」补到刚发出的那条消息末尾。 */
+  /** 群聊里把「本轮花了多少 token」补到刚发出的那条消息末尾。 */
   async function appendTurnFooter() {
     const last = state.lastTurn
     if (!last) return
@@ -979,15 +979,7 @@ export function apply(ctx, config = {}) {
     const tokens =
       (Number(usage.input) || 0) + (Number(usage.cache) || 0) + (Number(usage.output) || 0)
     if (tokens <= 0) return
-    const cost = Number(last.cost) || 0
-    let money = '余额读不到'
-    try {
-      const bal = await budgetDesk.balance(false)
-      if (bal?.ok) money = `余额 ¥${bal.total}`
-    } catch {}
-    const costPart = cost > 0 ? ` · ¥${cost.toFixed(4)}` : ''
-    const footer = `-# 本轮 ${tokens.toLocaleString()} tokens${costPart} · ${money}`
-    await writer.appendFooter(footer)
+    await writer.appendFooter(`-# 本轮 ${tokens.toLocaleString()} tokens`)
   }
 
   async function deliver(job) {

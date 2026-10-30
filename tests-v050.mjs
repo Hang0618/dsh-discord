@@ -64,9 +64,9 @@ function matchEmojiReply(content, replies) {
     if (!trigger) continue
     const needle = normalizeEmoji(emojiShortcodeToUnicode(trigger))
     const count = countOccurrences(plain, needle)
-    if (count > 0) pieces.push(Array(count).fill(emojiShortcodeToUnicode(reply)).join('\n'))
+    if (count > 0) pieces.push(Array(count).fill(emojiShortcodeToUnicode(reply)).join(''))
   }
-  return pieces.length ? pieces.join('\n') : null
+  return pieces.length ? pieces.join('') : null
 }
 const replies = cfg.emojiReplies
 ok(
@@ -90,8 +90,8 @@ ok('✋ 版第二组暗号命中', matchEmojiReply('token来✋😈🤚', replie
 ok('🖐️ 版也命中（两种画法归一）', matchEmojiReply('token来🖐️😈🤚', replies) === 'token回！👋 😈👋',
   String(matchEmojiReply('token来🖐️😈🤚', replies)))
 ok(
-  '发两遍回两遍（每遍一行）',
-  matchEmojiReply('token来✋😈🤚token来✋😈🤚', replies) === 'token回！👋 😈👋\ntoken回！👋 😈👋',
+  '发两遍回两遍（连着写）',
+  matchEmojiReply('token来✋😈🤚token来✋😈🤚', replies) === 'token回！👋 😈👋token回！👋 😈👋',
   JSON.stringify(matchEmojiReply('token来✋😈🤚token来✋😈🤚', replies)),
 )
 ok('普通消息不命中', matchEmojiReply('今天吃什么', replies) === null)
