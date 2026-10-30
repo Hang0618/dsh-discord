@@ -32,7 +32,7 @@ export const name = 'dsh-discord'
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets']
 
 /** 日志里带版本号，方便确认热重载到底有没有换成新代码 */
-const VERSION = '0.5.4'
+const VERSION = '0.5.5'
 
 const HELP_TEXT = [
   '**我在呢。** 直接说话就行，别的都不用管。',
@@ -469,8 +469,19 @@ export function apply(ctx, config = {}) {
         interpolate: false, // 昵称里可能有 {{ }}，别让宿主当模板解析
         text: speakerPromptText,
       })
+      // 沉默规则：主人 @ 别人、明显是在跟别人聊天时，模型可以一个字都不回。
+      // 插件看到整条只有 [SILENT] 就不发消息（不是「忽略」提示，是真的不出声）。
+      systemPrompt.context({
+        name: 'discord-silent',
+        order: 20001,
+        interpolate: false,
+        text:
+          '【沉默规则】如果这条消息明显不是在跟你说话（比如主人在跟别人聊天、只是 @ 了别人，' +
+          '没有提到你、也没有引用你），或者你判断插话没有意义：不要回复，只输出一行 [SILENT]。' +
+          '插件看到整条只有 [SILENT] 就不会发任何消息；如果你已经写了别的话，那部分照常发出去。',
+      })
       agent.__discordSpeakerInjected = true
-      log('说话人称呼已挂上（每轮按当前说话人取 Discord 昵称）')
+      log('说话人称呼与沉默规则已挂上（每轮按当前说话人取 Discord 昵称）')
     } catch (error) {
       log(`注入说话人称呼失败：${error?.message || error}`)
     }
@@ -1143,12 +1154,12 @@ export function apply(ctx, config = {}) {
       log(`主人批准过跟机器人 ${policy.name} 聊（本轮第 ${streak.count} 条），继续处理`)
     }
 
-    // 主人 @ 别人 = 主动把这个人指给我看（介绍/指认/让他搭话），要放行；
-    // 别人 @ 别人 = 在跟别人聊天，我不插嘴。
+    // 主人 @ 别人 = 把这个人指给我看（介绍/指认/让他搭话），要放行；
+    // 但到底接不接、是不是在跟别人聊，交给模型自己判断（它可以回 [SILENT] 一个字都不发）。
     const ownerHandsOver =
       !isDM && isOwner && otherMentions.length > 0 && !botMentioned && !repliesToBot
     if (ownerHandsOver) {
-      log(`主人 @ 了别人（${otherMentions.join(',')}），算在跟我说话`)
+      log(`主人 @ 了别人（${otherMentions.join(',')}），转给模型判断要不要接`)
     }
     if (!isDM && !isBot && !isOwner && otherMentions.length > 0 && !botMentioned && !repliesToBot) {
       log(`有人 @ 了别人，不插话（sender=${senderId}）`)

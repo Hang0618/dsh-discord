@@ -2,6 +2,7 @@
 // 直接跑：node tests-v050.mjs
 import { resolveConfig, resolveBudget, DEFAULT_CONFIG_PATH } from './src/config.js'
 import { createBudgetDesk } from './src/budget.js'
+import { isSilentReply } from './src/outbound.js'
 
 let passed = 0
 let failed = 0
@@ -96,6 +97,12 @@ ok(
 )
 ok('普通消息不命中', matchEmojiReply('今天吃什么', replies) === null)
 ok('单表情不误伤', matchEmojiReply('🖐️', replies) === null)
+
+// 2.5 沉默标记（模型判断「不是跟我说话」时不发消息）
+ok('整条 [SILENT] → 不发', isSilentReply('[SILENT]') === true)
+ok('[SILENT] 带标点/空白 → 不发', isSilentReply('  [SILENT]。 ') === true)
+ok('正常文字 → 照发', isSilentReply('好的，我在。') === false)
+ok('文字里夹 [SILENT] → 照发', isSilentReply('这题我会 [SILENT] 然后继续') === false)
 
 // 3. 额度只管服务器里的其他人
 function deskWithQuota(quota) {

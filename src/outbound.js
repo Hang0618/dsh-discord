@@ -18,6 +18,13 @@ export function stripInternalMarkers(text) {
   return String(text ?? '').replace(INTERNAL_MARKER_RE, '')
 }
 
+// 模型判断「这条不是跟我说话」时约定的沉默标记：整条只回这个，就一个字都不发。
+const SILENT_RE = /^[\s。.!！?？~～]*\[SILENT\][\s。.!！?？~～]*$/i
+
+export function isSilentReply(text) {
+  return SILENT_RE.test(String(text ?? ''))
+}
+
 export class StreamWriter {
   /**
    * @param {{rest: any, chunkLimit: number, editIntervalMs: number, log: Function}} options
@@ -141,6 +148,11 @@ export class StreamWriter {
     const raw = this.group.text
     // 工具调用协议碎片不是给用户看的：整条都是就丢弃，夹在正文里就剥掉
     const text = stripInternalMarkers(raw)
+    // 模型判断「这条不是跟我说话」，整条只回了 [SILENT]：一个字都不发
+    if (isSilentReply(text)) {
+      this.log('[silent] 这一轮判断不该插话，没发消息')
+      return
+    }
     if (!text.trim()) {
       if (raw.trim()) this.log(`[sanitize] 整条回复都是工具调用残留（${raw.length} 字），丢弃`)
       return
