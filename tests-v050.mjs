@@ -29,6 +29,15 @@ const cfgCustom = resolveConfig(
 )
 ok('历史分钟可配置为 0', cfgCustom.guildHistoryMinutes === 0, String(cfgCustom.guildHistoryMinutes))
 ok('群聊会话可显式指定', cfgCustom.guildSessions['1'] === 's1')
+// 狂暴催问模式：默认关，开了之后 1 秒 / 0.5 秒一次
+ok('狂暴模式默认关', cfg.pingBack.rageEnabled === false)
+ok('狂暴模式默认 1 秒后开始', cfg.pingBack.rageAfterMs === 1000, String(cfg.pingBack.rageAfterMs))
+ok('狂暴模式默认每 0.5 秒一次', cfg.pingBack.rageIntervalMs === 500, String(cfg.pingBack.rageIntervalMs))
+const cfgRage = resolveConfig(
+  { token: 'x', configPath: '/nonexistent/r.json', pingBack: { rageEnabled: true } },
+  () => {},
+)
+ok('狂暴模式可打开', cfgRage.pingBack.rageEnabled === true)
 
 // 2. 暗号匹配（跟 index.js 里同逻辑）
 const EMOJI_SHORTCODES = {

@@ -407,6 +407,7 @@ window.__ModuleLoader__.load({
           globalQuota: asText(b.globalQuota),
           dmQuota: asText(b.dmQuota),
           guildHistoryMinutes: asText(next?.guildHistoryMinutes ?? 1),
+          rageEnabled: Boolean(next?.rageEnabled),
         })
         const rows = Array.isArray(next?.guilds) ? next.guilds : []
         const map = {}
@@ -478,6 +479,7 @@ window.__ModuleLoader__.load({
             skipOwners: draft.skipOwners !== false,
             guildHistoryMinutes:
               textOf(draft.guildHistoryMinutes) === '' ? 0 : Number(draft.guildHistoryMinutes),
+            rageEnabled: Boolean(draft.rageEnabled),
             global: textOf(draft.global) === '' ? 0 : Number(draft.global),
             dm: textOf(draft.dm) === '' ? null : Number(draft.dm),
             globalQuota: textOf(draft.globalQuota) === '' ? null : Number(draft.globalQuota),
@@ -664,6 +666,23 @@ window.__ModuleLoader__.load({
             '0.1',
           ),
           h('span', { style: S.user }, '只对服务器生效；私聊不读历史'),
+        ),
+        h(
+          'div',
+          { style: S.actions },
+          h('span', null, '狂暴催问'),
+          h('input', {
+            type: 'checkbox',
+            checked: Boolean(draft.rageEnabled),
+            onChange: (e) => patchDraft({ rageEnabled: e.target.checked }),
+          }),
+          h(
+            'span',
+            { style: S.user },
+            draft.rageEnabled
+              ? '开：对方 1 秒不回，就每 0.5 秒 @ 一次，直到回话'
+              : '关：只在 20 秒后温和地 @ 一次、最多 3 次',
+          ),
         ),
         h(
           'div',

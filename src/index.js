@@ -34,7 +34,7 @@ export const name = 'dsh-discord'
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets']
 
 /** 日志里带版本号，方便确认热重载到底有没有换成新代码 */
-const VERSION = '0.6.17'
+const VERSION = '0.6.18'
 
 const HELP_TEXT = [
   '**我在呢。** 直接说话就行，别的都不用管。',
@@ -80,6 +80,8 @@ export function apply(ctx, config = {}) {
       raw.guildSessions = cfg.guildSessions
       // 群聊历史分钟数也要落盘：以前漏了这行，面板里改成 3，重启后又读回默认 10
       raw.guildHistoryMinutes = cfg.guildHistoryMinutes
+      // 催问（含狂暴模式开关）也落盘，面板里改了重启不丢
+      raw.pingBack = cfg.pingBack
       const tmp = `${cfg.configPath}.tmp`
       writeFileSync(tmp, JSON.stringify(raw, null, 2), 'utf8')
       renameSync(tmp, cfg.configPath)
@@ -190,6 +192,7 @@ export function apply(ctx, config = {}) {
                     ...budgetDesk.status(),
                     guilds: budgetDesk.guildList(),
                     guildHistoryMinutes: cfg.guildHistoryMinutes,
+                    rageEnabled: cfg.pingBack?.rageEnabled === true,
                     notice: state.lastPause,
                   })
                 }
@@ -219,6 +222,10 @@ export function apply(ctx, config = {}) {
                       0,
                       Math.min(1440, Number(historyMinutes) || 0),
                     )
+                  }
+                  if (typeof body?.rageEnabled === 'boolean') {
+                    cfg.pingBack = { ...cfg.pingBack, rageEnabled: body.rageEnabled }
+                    log(`狂暴催问：${body.rageEnabled ? '开' : '关'}`)
                   }
                   budgetDesk.resetReminders()
                   persistAccess()
@@ -1025,9 +1032,17 @@ export function apply(ctx, config = {}) {
     const target = job?.speaker
     if (!target?.id) return
     if (state.botUserId && String(target.id) === String(state.botUserId)) return
-    const afterMs = Math.max(1000, Number(conf.afterMs) || 20_000)
-    const intervalMs = Math.max(1000, Number(conf.intervalMs) || 30_000)
-    const maxTimes = Math.max(1, Math.min(10, Math.floor(Number(conf.maxTimes) || 3)))
+    const rage = conf.rageEnabled === true
+    const afterMs = rage
+      ? Math.max(500, Number(conf.rageAfterMs) || 1000)
+      : Math.max(1000, Number(conf.afterMs) || 20_000)
+    const intervalMs = rage
+      ? Math.max(500, Number(conf.rageIntervalMs) || 500)
+      : Math.max(1000, Number(conf.intervalMs) || 30_000)
+    const configuredMax = rage
+      ? Math.max(0, Math.min(1000, Math.floor(Number(conf.rageMaxTimes) || 0)))
+      : Math.max(1, Math.min(10, Math.floor(Number(conf.maxTimes) || 3)))
+    const maxTimes = configuredMax === 0 ? Infinity : configuredMax
     const giveUpAfterMs = Math.max(1000, Number(conf.giveUpAfterMs) || 30_000)
     const giveUpText = String(conf.giveUpText || '好像没人在了，那我先不打扰啦。')
     const pending = {
@@ -1058,7 +1073,8 @@ export function apply(ctx, config = {}) {
         pending.count += 1
         try {
           await rest.sendMessage(pending.channelId, `<@${pending.userId}> 在吗？`)
-          log(`催问：${pending.name} 还没回，第 ${pending.count}/${maxTimes} 次 @ 了 ta`)
+          const times = maxTimes === Infinity ? `第 ${pending.count} 次` : `第 ${pending.count}/${maxTimes} 次`
+          log(`催问：${pending.name} 还没回，${times} @ 了 ta`)
         } catch (error) {
           log(`催问发送失败：${error?.message || error}`)
         }
@@ -1069,7 +1085,9 @@ export function apply(ctx, config = {}) {
     }
     schedule(afterMs)
     log(
-      `开始等 ${pending.name} 回话：${Math.round(afterMs / 1000)} 秒没动静就 @ ta（最多 ${maxTimes} 次）`,
+      rage
+        ? `开始等 ${pending.name} 回话（狂暴模式）：${Math.round(afterMs / 1000)} 秒没动静就每 ${intervalMs / 1000} 秒 @ 一次，直到回话`
+        : `开始等 ${pending.name} 回话：${Math.round(afterMs / 1000)} 秒没动静就 @ ta（最多 ${maxTimes} 次）`,
     )
   }
 

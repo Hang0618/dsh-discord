@@ -303,6 +303,12 @@ export function resolveConfig(raw = {}, log) {
       afterMs: Math.max(1000, Number(merged.pingBack?.afterMs) || 20_000),
       intervalMs: Math.max(1000, Number(merged.pingBack?.intervalMs) || 30_000),
       maxTimes: Math.max(1, Math.min(10, Math.floor(Number(merged.pingBack?.maxTimes) || 3))),
+      // 狂暴模式：默认关；开了以后对方 1 秒没回就每 0.5 秒 @ 一次，直到 ta 回话
+      rageEnabled: merged.pingBack?.rageEnabled === true,
+      rageAfterMs: Math.max(500, Number(merged.pingBack?.rageAfterMs) || 1000),
+      rageIntervalMs: Math.max(500, Number(merged.pingBack?.rageIntervalMs) || 500),
+      // 0 = 不设上限（回话才停）；想留个刹车可以配成正整数
+      rageMaxTimes: Math.max(0, Math.min(1000, Math.floor(Number(merged.pingBack?.rageMaxTimes) || 0))),
       giveUpAfterMs: Math.max(1000, Number(merged.pingBack?.giveUpAfterMs) || 30_000),
       giveUpText: String(
         merged.pingBack?.giveUpText || '好像没人在了，那我先不打扰啦。',
