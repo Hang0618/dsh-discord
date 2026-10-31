@@ -34,7 +34,7 @@ export const name = 'dsh-discord'
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets']
 
 /** 日志里带版本号，方便确认热重载到底有没有换成新代码 */
-const VERSION = '0.6.20'
+const VERSION = '0.6.21'
 
 const HELP_TEXT = [
   '**我在呢。** 直接说话就行，别的都不用管。',
@@ -669,9 +669,13 @@ export function apply(ctx, config = {}) {
 
   // ---------- typing ----------
 
+  // 输入中提示只在「真的开始写正文」时才发（见 writer.onContent）；
+  // 模型这一轮只输出 [SILENT]、决定不插话时，Discord 那边完全不会看到「正在输入」。
   function startTyping(channelId) {
     if (!cfg.typing) return
+    if (state.typingChannel === channelId) return
     stopTyping()
+    state.typingChannel = channelId
     void rest.sendTyping(channelId)
     state.typingTimer = setInterval(() => void rest.sendTyping(channelId), 8000)
   }
@@ -681,6 +685,13 @@ export function apply(ctx, config = {}) {
       clearInterval(state.typingTimer)
       state.typingTimer = null
     }
+    state.typingChannel = null
+  }
+
+  // 累计输出还只是「[SILENT]」的前缀（或空白）时，先别显示输入中
+  const SILENT_PREFIX_RE = /^[\s。.!！?？~～]*\[?[SILENT]*\]?[\s。.!！?？~～]*$/i
+  function isPotentiallySilent(text) {
+    return SILENT_PREFIX_RE.test(String(text || ''))
   }
 
   // ---------- 服务器名字（面板里显示得好看些）----------
@@ -740,8 +751,6 @@ export function apply(ctx, config = {}) {
         // 只有这一轮真的发出去过消息，才催对方；整轮 [SILENT] 没说话就别去 @ 人
         if (writer.lastSent) armPingBack(state.lastJob)
       })()
-    } else if (status === 'running') {
-      if (state.channelId) startTyping(state.channelId)
     }
   })
 
@@ -1151,10 +1160,13 @@ export function apply(ctx, config = {}) {
     const sessionId = sessionIdFor({ isDM, guildId: speaker?.guildId ?? null })
     state.activeSessionId = sessionId
     writer.setTarget(channelId, cfg.replyToUser ? replyToId : null)
+    // 只有模型开始写正文时才显示「正在输入」；只输出 [SILENT] 的轮次完全不显示
+    writer.onContent = (text) => {
+      if (state.channelId && !isPotentiallySilent(text)) startTyping(state.channelId)
+    }
     try {
       const agent = await ensureReady(sessionId)
       state.agent = agent
-      if (agent.status !== 'running') startTyping(channelId)
       agent.followup(makeUserMessage(content))
       state.lastJob = job
       log(

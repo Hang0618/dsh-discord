@@ -200,5 +200,16 @@ ok('三大次起点在 0/130/260 秒', JSON.stringify(pingBackUpgradePlan().star
 ok('三大次后 390 秒自动升狂暴', pingBackUpgradePlan().rageStart === 390000, String(pingBackUpgradePlan().rageStart))
 ok('狂暴 1 秒后首 @，最多 30 秒就停', pingBackUpgradePlan().rageStart + 1000 === 391000)
 
+// 7. 输入中提示：累计输出还是 [SILENT] 的前缀时，先不显示「正在输入」
+const SILENT_PREFIX_RE = /^[\s。.!！?？~～]*\[?[SILENT]*\]?[\s。.!！?？~～]*$/i
+const silentPrefix = (text) => SILENT_PREFIX_RE.test(String(text || ''))
+ok('还是空白 → 不显示输入中', silentPrefix('') === true)
+ok('刚打出 [ → 不显示', silentPrefix('[') === true)
+ok('打到 [SIL → 不显示', silentPrefix('[SIL') === true)
+ok('整条 [SILENT] → 不显示', silentPrefix('[SILENT]') === true)
+ok('[SILENT] 带标点 → 不显示', silentPrefix(' [SILENT]。') === true)
+ok('开始写正文 → 显示', silentPrefix('哼') === false)
+ok('[SILENT] 后接正文 → 显示', silentPrefix('[SILENT] 哼') === false)
+
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed === 0 ? 0 : 1)

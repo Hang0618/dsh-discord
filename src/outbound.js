@@ -107,6 +107,7 @@ export class StreamWriter {
     if (!this.group || !text) return
     this.group.text += text
     this.producedAnyText = true
+    this.onContent?.(this.group.text)
     // 不流式时只累积，等 endTurn 一次性发出去 —— 否则 Discord 会显示「已编辑」
     if (this.stream) this.schedule()
   }
