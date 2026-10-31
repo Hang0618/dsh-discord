@@ -34,7 +34,7 @@ export const name = 'dsh-discord'
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets']
 
 /** 日志里带版本号，方便确认热重载到底有没有换成新代码 */
-const VERSION = '0.6.19'
+const VERSION = '0.6.20'
 
 const HELP_TEXT = [
   '**我在呢。** 直接说话就行，别的都不用管。',
@@ -1033,62 +1033,110 @@ export function apply(ctx, config = {}) {
     if (!target?.id) return
     if (state.botUserId && String(target.id) === String(state.botUserId)) return
     const rage = conf.rageEnabled === true
-    const afterMs = rage
-      ? Math.max(500, Number(conf.rageAfterMs) || 1000)
-      : Math.max(1000, Number(conf.afterMs) || 20_000)
-    const intervalMs = rage
-      ? Math.max(500, Number(conf.rageIntervalMs) || 500)
-      : Math.max(1000, Number(conf.intervalMs) || 30_000)
-    const configuredMax = rage
-      ? Math.max(0, Math.min(1000, Math.floor(Number(conf.rageMaxTimes) || 0)))
-      : Math.max(1, Math.min(10, Math.floor(Number(conf.maxTimes) || 3)))
-    const maxTimes = configuredMax === 0 ? Infinity : configuredMax
+    const afterMs = Math.max(1000, Number(conf.afterMs) || 20_000)
+    const intervalMs = Math.max(1000, Number(conf.intervalMs) || 30_000)
+    const maxTimes = Math.max(1, Math.min(10, Math.floor(Number(conf.maxTimes) || 3)))
     const giveUpAfterMs = Math.max(1000, Number(conf.giveUpAfterMs) || 30_000)
     const giveUpText = String(conf.giveUpText || '好像没人在了，那我先不打扰啦。')
+    // 普通催问的一大次 = 20 秒首 @ + 每 30 秒共 3 次 + 30 秒后一句收尾；
+    // 跑满 rounds 大次还叫不动，就自动升级到狂暴模式
+    const rounds = Math.max(1, Math.min(10, Math.floor(Number(conf.rounds) || 3)))
+    const rageAfterMs = Math.max(500, Number(conf.rageAfterMs) || 1000)
+    const rageIntervalMs = Math.max(500, Number(conf.rageIntervalMs) || 500)
+    const rageDurationMs = Math.max(1000, Number(conf.rageDurationMs) || 30_000)
     const pending = {
       channelId: job.channelId,
       userId: String(target.id),
       name: target.name || '对方',
       count: 0,
+      round: 0,
     }
     state.pingBackPending = pending
+    const ping = async (label) => {
+      try {
+        await rest.sendMessage(pending.channelId, `<@${pending.userId}> 在吗？`)
+        log(label)
+      } catch (error) {
+        log(`催问发送失败：${error?.message || error}`)
+      }
+    }
+    // 狂暴：每 rageIntervalMs @ 一次，最多持续 rageDurationMs 就停
+    const startRage = () => {
+      const startedAt = Date.now()
+      log(
+        `升级到狂暴模式：每 ${rageIntervalMs / 1000} 秒 @ 一次 ${pending.name}，最多持续 ${Math.round(rageDurationMs / 1000)} 秒`,
+      )
+      const tick = async () => {
+        if (state.pingBackPending !== pending) return
+        if (Date.now() - startedAt >= rageDurationMs) {
+          state.pingBackPending = null
+          state.pingBackTimer = null
+          log(`狂暴催问 ${pending.name} 持续 ${Math.round(rageDurationMs / 1000)} 秒仍没回，停下`)
+          return
+        }
+        pending.count += 1
+        await ping(`狂暴催问：${pending.name} 还没回，第 ${pending.count} 次 @ 了 ta`)
+        if (state.pingBackPending !== pending) return
+        state.pingBackTimer = setTimeout(tick, rageIntervalMs)
+      }
+      state.pingBackTimer = setTimeout(tick, rageAfterMs)
+    }
     const scheduleGiveUp = () => {
       state.pingBackTimer = setTimeout(async () => {
         if (state.pingBackPending !== pending) return
-        // 先摘掉 pending，免得收尾期间 ta 回话又去走取消逻辑
-        state.pingBackPending = null
-        state.pingBackTimer = null
         try {
           await rest.sendMessage(pending.channelId, giveUpText)
+          if (state.pingBackPending !== pending) return
           await rest.sendMessage(pending.channelId, `<@${pending.userId}>`)
-          log(`催问 ${maxTimes} 次无果，${pending.name} 一直没回，留了一句收尾并最后 @ 了一次`)
+          if (state.pingBackPending !== pending) return
+          log(
+            `第 ${pending.round}/${rounds} 大次催问无果，${pending.name} 一直没回，留了一句收尾并最后 @ 了一次`,
+          )
         } catch (error) {
           log(`收尾消息发送失败：${error?.message || error}`)
+          return
+        }
+        if (state.pingBackPending !== pending) return
+        if (rounds > pending.round) {
+          // 还有大次：等 afterMs 再从「20 秒后首 @」开始下一大次
+          state.pingBackTimer = setTimeout(() => {
+            if (state.pingBackPending === pending) startRound()
+          }, afterMs)
+        } else {
+          // 三大次都叫不动 → 自动升级狂暴模式
+          log(`催问 ${rounds} 大次都没叫动 ${pending.name}，自动升级狂暴模式`)
+          state.pingBackTimer = setTimeout(() => {
+            if (state.pingBackPending === pending) startRage()
+          }, afterMs)
         }
       }, giveUpAfterMs)
     }
-    const schedule = (delay) => {
-      state.pingBackTimer = setTimeout(async () => {
-        if (state.pingBackPending !== pending) return
-        pending.count += 1
-        try {
-          await rest.sendMessage(pending.channelId, `<@${pending.userId}> 在吗？`)
-          const times = maxTimes === Infinity ? `第 ${pending.count} 次` : `第 ${pending.count}/${maxTimes} 次`
-          log(`催问：${pending.name} 还没回，${times} @ 了 ta`)
-        } catch (error) {
-          log(`催问发送失败：${error?.message || error}`)
-        }
-        if (state.pingBackPending !== pending) return
-        if (pending.count < maxTimes) schedule(intervalMs)
-        else scheduleGiveUp()
-      }, delay)
+    const startRound = () => {
+      pending.round += 1
+      pending.count = 0
+      log(
+        `第 ${pending.round}/${rounds} 大次催问：${Math.round(afterMs / 1000)} 秒没动静就 @ ${pending.name}（最多 ${maxTimes} 次）`,
+      )
+      const schedule = (delay) => {
+        state.pingBackTimer = setTimeout(async () => {
+          if (state.pingBackPending !== pending) return
+          pending.count += 1
+          await ping(`催问：${pending.name} 还没回，第 ${pending.count}/${maxTimes} 次 @ 了 ta`)
+          if (state.pingBackPending !== pending) return
+          if (pending.count < maxTimes) schedule(intervalMs)
+          else scheduleGiveUp()
+        }, delay)
+      }
+      schedule(afterMs)
     }
-    schedule(afterMs)
-    log(
-      rage
-        ? `开始等 ${pending.name} 回话（狂暴模式）：${Math.round(afterMs / 1000)} 秒没动静就每 ${intervalMs / 1000} 秒 @ 一次，直到回话`
-        : `开始等 ${pending.name} 回话：${Math.round(afterMs / 1000)} 秒没动静就 @ ta（最多 ${maxTimes} 次）`,
-    )
+    if (rage) {
+      startRage()
+    } else {
+      log(
+        `开始等 ${pending.name} 回话：${Math.round(afterMs / 1000)} 秒没动静就 @ ta，共 ${rounds} 大次，都叫不动就升狂暴`,
+      )
+      startRound()
+    }
   }
 
   async function deliver(job) {

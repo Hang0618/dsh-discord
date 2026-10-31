@@ -38,6 +38,8 @@ const cfgRage = resolveConfig(
   () => {},
 )
 ok('狂暴模式可打开', cfgRage.pingBack.rageEnabled === true)
+ok('狂暴模式最多持续 30 秒', cfg.pingBack.rageDurationMs === 30000, String(cfg.pingBack.rageDurationMs))
+ok('普通催问默认跑 3 大次', cfg.pingBack.rounds === 3, String(cfg.pingBack.rounds))
 
 // 2. 暗号匹配（跟 index.js 里同逻辑）
 const EMOJI_SHORTCODES = {
@@ -179,6 +181,24 @@ ok('催问 3 次落在 20s/50s/80s', JSON.stringify(pingBackPlan()) === '[20000,
 ok('催问次数可配置', pingBackPlan({ maxTimes: 1 }).length === 1)
 ok('催问间隔可配置', JSON.stringify(pingBackPlan({ afterMs: 5000, intervalMs: 10000, maxTimes: 2 })) === '[5000,15000]')
 ok('第 3 次催问后再等 30 秒收尾', pingBackPlan()[2] + 30000 === 110000)
+
+// 6.1 升级链：一大次 = 20s 首 @ + 每 30s 共 3 次 + 30s 收尾 = 110s；大次之间再等 20s；
+//     3 大次后（390s）自动升狂暴，1 秒后首 @，最多持续 30 秒
+function pingBackUpgradePlan({
+  afterMs = 20000,
+  intervalMs = 30000,
+  maxTimes = 3,
+  giveUpAfterMs = 30000,
+  rounds = 3,
+} = {}) {
+  const roundMs = afterMs + (maxTimes - 1) * intervalMs + giveUpAfterMs
+  const starts = Array.from({ length: rounds }, (_, i) => i * (roundMs + afterMs))
+  const rageStart = (rounds - 1) * (roundMs + afterMs) + roundMs + afterMs
+  return { starts, rageStart }
+}
+ok('三大次起点在 0/130/260 秒', JSON.stringify(pingBackUpgradePlan().starts) === '[0,130000,260000]', JSON.stringify(pingBackUpgradePlan().starts))
+ok('三大次后 390 秒自动升狂暴', pingBackUpgradePlan().rageStart === 390000, String(pingBackUpgradePlan().rageStart))
+ok('狂暴 1 秒后首 @，最多 30 秒就停', pingBackUpgradePlan().rageStart + 1000 === 391000)
 
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed === 0 ? 0 : 1)

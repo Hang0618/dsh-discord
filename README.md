@@ -80,7 +80,9 @@
 
 配置：`pingBack: { enabled, afterMs, intervalMs, maxTimes, giveUpAfterMs, giveUpText }`，默认 `true / 20000 / 30000 / 3 / 30000 / 上面那句`。
 
-**狂暴模式**（面板里勾选「狂暴催问」，或 `pingBack.rageEnabled: true`，默认关）：打开后不再温和地等 20 秒——对方 **1 秒**没回，就以**每 0.5 秒一次**的频率 @ 对方问「在吗？」，一直 @ 到对方回话为止（`rageAfterMs` / `rageIntervalMs` / `rageMaxTimes` 可调，`rageMaxTimes` 默认 0 = 不设上限）。告别语收尾、私聊、对方是机器人这些老规矩不变。
+**狂暴模式**（面板里勾选「狂暴催问」，或 `pingBack.rageEnabled: true`，默认关）：打开后不再温和地等 20 秒——对方 **1 秒**没回，就以**每 0.5 秒一次**的频率 @ 对方问「在吗？」，**最多持续 30 秒**（`rageDurationMs` 可调）就停。
+即使不打开，普通催问跑满 **3 大次**还叫不动，也会**自动升级**到狂暴模式（所以最长会先温和地催 3 轮、再狂暴 30 秒）。
+「一大次」= 对方 20 秒没回先 @ 一次 → 之后每 30 秒再 @、共 3 次 → 再等 30 秒留一句收尾；收尾后对方仍不理、再等 20 秒开始下一大次。告别语收尾、私聊、对方是机器人这些老规矩不变。
 
 ### 怎么称呼对面
 
@@ -203,7 +205,7 @@ token 和 user ID **不进源码**，写在 `<DSH_HOME>/discord-bridge.json`（�
 | `guildHistoryMinutes` | `1` | 群聊先读最近几分钟内的消息（0 = 不读，默认 1，支持 0.5 = 30 秒，最大 1440；只服务器生效） |
 | `botStreakLimit` | `10` | 别的机器人连续说话最多接几轮（1–50），防两个 bot 互刷；人类一说话计数归零 |
 | `emojiReplies` | 见上文 | 暗号表：`{ "你发的": "它回的" }`，短码或真 emoji 都认 |
-| `pingBack` | `{ enabled: true, afterMs: 20000, intervalMs: 30000, maxTimes: 3, giveUpAfterMs: 30000, giveUpText: "…", rageEnabled: false, rageAfterMs: 1000, rageIntervalMs: 500, rageMaxTimes: 0 }` | 回完某人对方不理就 @ 一次，之后每 30 秒一次、最多 3 次；再等 30 秒还没回就留一句收尾（仅群聊）。`rageEnabled` 打开后变成 1 秒没回就每 0.5 秒 @ 一次直到回话 |
+| `pingBack` | `{ enabled: true, afterMs: 20000, intervalMs: 30000, maxTimes: 3, giveUpAfterMs: 30000, giveUpText: "…", rounds: 3, rageEnabled: false, rageAfterMs: 1000, rageIntervalMs: 500, rageDurationMs: 30000 }` | 回完某人对方不理就 @ 一次，之后每 30 秒一次、最多 3 次；再等 30 秒还没回就留一句收尾（仅群聊）。这样算一大次，跑满 3 大次自动升狂暴；`rageEnabled` 打开则直接狂暴：1 秒没回每 0.5 秒 @ 一次，最多 30 秒 |
 | `spend` | `{}` | 花费账本：`{ "<scope>": { spent, updatedAt, since } }`，由插件自己攒 |
 | `guildNames` | `{}` | 见过的服务器 id → 名字（面板显示用，插件自动补） |
 | `consentTimeoutMs` | `600000` | 陌生人的确认卡片等多久（超时作废，再来就再问） |

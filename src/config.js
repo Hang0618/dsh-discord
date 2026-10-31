@@ -309,6 +309,11 @@ export function resolveConfig(raw = {}, log) {
       rageIntervalMs: Math.max(500, Number(merged.pingBack?.rageIntervalMs) || 500),
       // 0 = 不设上限（回话才停）；想留个刹车可以配成正整数
       rageMaxTimes: Math.max(0, Math.min(1000, Math.floor(Number(merged.pingBack?.rageMaxTimes) || 0))),
+      // 狂暴状态最多持续多久（到点就停，不再 @）
+      rageDurationMs: Math.max(1000, Number(merged.pingBack?.rageDurationMs) || 30_000),
+      // 普通催问最多跑几大次：每大次 = 20s 首 @ + 每 30s 共 3 次 + 30s 后一句收尾；
+      // 跑满还没回，就自动升级到狂暴模式
+      rounds: Math.max(1, Math.min(10, Math.floor(Number(merged.pingBack?.rounds) || 3))),
       giveUpAfterMs: Math.max(1000, Number(merged.pingBack?.giveUpAfterMs) || 30_000),
       giveUpText: String(
         merged.pingBack?.giveUpText || '好像没人在了，那我先不打扰啦。',
