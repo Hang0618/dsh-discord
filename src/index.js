@@ -34,7 +34,7 @@ export const name = 'dsh-discord'
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets']
 
 /** 日志里带版本号，方便确认热重载到底有没有换成新代码 */
-const VERSION = '0.6.18'
+const VERSION = '0.6.19'
 
 const HELP_TEXT = [
   '**我在呢。** 直接说话就行，别的都不用管。',
@@ -1136,8 +1136,13 @@ export function apply(ctx, config = {}) {
       log('忽略：自己发的')
       return
     }
-    // 刚才催问的人回话了 → 不用再催
-    if (state.pingBackPending && String(state.pingBackPending.userId) === senderId) {
+    // 刚才催问的人回话了 → 不用再催；这条消息本身就是在回应我，
+    // 就算没 @、没叫名字，也要接（不然催了半天、人家回了「在」，我却装没看见）
+    const wasPingedBack = Boolean(
+      state.pingBackPending && String(state.pingBackPending.userId) === senderId,
+    )
+    if (wasPingedBack) {
+      log(`催问的人回话了，把这条当作在跟我说话（${state.pingBackPending.name || senderId}）`)
       clearPingBack('对方回话了')
     }
 
@@ -1287,7 +1292,7 @@ export function apply(ctx, config = {}) {
         Boolean(grant) &&
         grant.requireMention === false &&
         mentionsTriggerWord(cleanContent(data.content), cfg.triggerWords)
-      const canChat = Boolean(grant) && (addressed || named)
+      const canChat = Boolean(grant) && (addressed || named || wasPingedBack)
       if (!canChat) {
         if (!addressed) {
           log(`忽略：没叫我（${grant ? '批准过但没叫' : '陌生人'}，sender=${senderId}）`)
